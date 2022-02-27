@@ -37,13 +37,25 @@ func main() {
 	if o.baseDir == "" {
 		l.Fatal("--base-dir is mandatory")
 	}
+
+	l.Info("Discovering api resources")
+	groupResourceListMap, err := discover(o.baseDir)
+	if err != nil {
+		l.Fatal("failed to discover apis", zap.Error(err))
+	}
+	groupSerializedResourceListMap, err := serializeAPIResourceList(groupResourceListMap)
+	if err != nil {
+		l.Fatal("failed to serialize apiresources", zap.Error(err))
+	}
+	l.Info("Finished discovering api resources")
+
 	router := httprouter.New()
 	router.GET("/api", func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
 		d := metav1.APIVersions{TypeMeta: metav1.TypeMeta{Kind: "APIVersions"}, Versions: []string{"v1"}}
 		serializeAndWite(l, w, d)
 	})
 	router.GET("/api/v1", func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
-		w.Write([]byte(coreResources))
+		w.Write(groupSerializedResourceListMap["v1"])
 	})
 	router.GET("/api/v1/namespaces/:namespace/pods", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		l := l.With(zap.String("path", r.URL.Path))
@@ -56,7 +68,7 @@ func main() {
 				serializeAndWite(l, w, unstructured.UnstructuredList{})
 				return
 			}
-			http.Error(w, fmt.Sprintf("failed to read %s: %w", path, err), http.StatusInternalServerError)
+			http.Error(w, fmt.Sprintf("failed to read %s: %v", path, err), http.StatusInternalServerError)
 			return
 		}
 
@@ -83,8 +95,4 @@ func serializeAndWite(l *zap.Logger, w http.ResponseWriter, data interface{}) {
 	if _, err := w.Write(serialized); err != nil {
 		l.Error("failed to write object", zap.Error(err))
 	}
-}
-
-type List struct {
-	Items []json.RawMessage `json:"items"`
 }
