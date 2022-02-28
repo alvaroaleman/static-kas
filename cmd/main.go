@@ -69,13 +69,25 @@ func main() {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core", vars["resource"]+".yaml")
-		serverPath(path, l, w)
+		servePath(path, l, w)
+	})
+	router.HandleFunc("/api/v1/namespaces/{namespace}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		l := l.With(zap.String("path", r.URL.Path))
+		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core", vars["resource"]+".yaml")
+		serveNamedObjectFromPath(path, l, w, vars["name"])
 	})
 	router.HandleFunc("/api/v1/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
-		serverPath(path, l, w)
+		servePath(path, l, w)
+	})
+	router.HandleFunc("/api/v1/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		l := l.With(zap.String("path", r.URL.Path))
+		path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
+		serveNamedObjectFromPath(path, l, w, vars["name"])
 	})
 	router.HandleFunc("/apis", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(serializedGroupList)
@@ -90,13 +102,25 @@ func main() {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
-		serverPath(path, l, w)
+		servePath(path, l, w)
+	})
+	router.HandleFunc("/apis/{group}/{version}/namespaces/{namespace}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		l := l.With(zap.String("path", r.URL.Path))
+		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
+		serveNamedObjectFromPath(path, l, w, vars["name"])
 	})
 	router.HandleFunc("/apis/{group}/{version}/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"], vars["resource"]+".yaml")
-		serverPath(path, l, w)
+		servePath(path, l, w)
+	})
+	router.HandleFunc("/apis/{group}/{version}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		l := l.With(zap.String("path", r.URL.Path))
+		path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"], vars["resource"]+".yaml")
+		serveNamedObjectFromPath(path, l, w, vars["name"])
 	})
 
 	if err := http.ListenAndServe(":8080", router); err != nil {
@@ -104,7 +128,7 @@ func main() {
 	}
 }
 
-func serverPath(path string, l *zap.Logger, w http.ResponseWriter) {
+func servePath(path string, l *zap.Logger, w http.ResponseWriter) {
 	raw, err := ioutil.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -123,6 +147,33 @@ func serverPath(path string, l *zap.Logger, w http.ResponseWriter) {
 		return
 	}
 	serializeAndWite(l, w, result)
+}
+
+func serveNamedObjectFromPath(path string, l *zap.Logger, w http.ResponseWriter, name string) {
+	raw, err := ioutil.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			l.Info("file not found", zap.String("path", path))
+			w.WriteHeader(404)
+			serializeAndWite(l, w, unstructured.UnstructuredList{})
+			return
+		}
+		http.Error(w, fmt.Sprintf("failed to read %s: %v", path, err), http.StatusInternalServerError)
+		return
+	}
+
+	result := unstructured.UnstructuredList{}
+	if err := yaml.Unmarshal(raw, &result); err != nil {
+		http.Error(w, fmt.Sprintf("failed to deserialize contents of %s: %v", path, err), http.StatusInternalServerError)
+		return
+	}
+	for _, item := range result.Items {
+		if item.GetName() == name {
+			serializeAndWite(l, w, item.Object)
+			return
+		}
+	}
+	w.WriteHeader(404)
 }
 
 func serializeAndWite(l *zap.Logger, w http.ResponseWriter, data interface{}) {
