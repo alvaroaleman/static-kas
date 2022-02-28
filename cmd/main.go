@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
@@ -18,6 +19,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
+
+	"github.com/alvaroaleman/static-kas/pkg/transform"
 )
 
 type options struct {
@@ -72,6 +75,8 @@ func main() {
 	}
 	l.Info("Finished discovering api resources")
 
+	tableTransformMap := transform.NewTableTransformMap()
+
 	router := mux.NewRouter()
 	router.HandleFunc("/api", func(w http.ResponseWriter, _ *http.Request) {
 		d := metav1.APIVersions{TypeMeta: metav1.TypeMeta{Kind: "APIVersions"}, Versions: []string{"v1"}}
@@ -84,13 +89,21 @@ func main() {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core", vars["resource"]+".yaml")
-		servePath(path, l, w)
+		var transformFunc func([]byte) (interface{}, error)
+		if acceptsTable(r) {
+			transformFunc = tableTransformMap[transform.TransformEntryKey{ResourceName: vars["resource"], Verb: transform.VerbList}]
+		}
+		servePath(path, l, w, transformFunc)
 	})
 	router.HandleFunc("/api/v1/namespaces/{namespace}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
+		var transformFunc func([]byte) (interface{}, error)
+		if acceptsTable(r) {
+			transformFunc = tableTransformMap[transform.TransformEntryKey{ResourceName: vars["resource"], Verb: transform.VerbGet}]
+		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core", vars["resource"]+".yaml")
-		serveNamedObjectFromPath(path, l, w, vars["name"])
+		serveNamedObjectFromPath(path, l, w, vars["name"], transformFunc)
 	})
 	router.HandleFunc("/api/v1/namespaces/{namespace}/pods/{name}/log", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -118,13 +131,13 @@ func main() {
 			return
 		}
 		path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
-		servePath(path, l, w)
+		servePath(path, l, w, nil)
 	})
 	router.HandleFunc("/api/v1/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
-		serveNamedObjectFromPath(path, l, w, vars["name"])
+		serveNamedObjectFromPath(path, l, w, vars["name"], nil)
 	})
 	router.HandleFunc("/apis", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(serializedGroupList)
@@ -139,25 +152,25 @@ func main() {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
-		servePath(path, l, w)
+		servePath(path, l, w, nil)
 	})
 	router.HandleFunc("/apis/{group}/{version}/namespaces/{namespace}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
-		serveNamedObjectFromPath(path, l, w, vars["name"])
+		serveNamedObjectFromPath(path, l, w, vars["name"], nil)
 	})
 	router.HandleFunc("/apis/{group}/{version}/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"], vars["resource"]+".yaml")
-		servePath(path, l, w)
+		servePath(path, l, w, nil)
 	})
 	router.HandleFunc("/apis/{group}/{version}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"], vars["resource"]+".yaml")
-		serveNamedObjectFromPath(path, l, w, vars["name"])
+		serveNamedObjectFromPath(path, l, w, vars["name"], nil)
 	})
 
 	if err := http.ListenAndServe(":8080", router); err != nil {
@@ -165,7 +178,15 @@ func main() {
 	}
 }
 
-func servePath(path string, l *zap.Logger, w http.ResponseWriter) {
+func defaultTransform(in []byte) (interface{}, error) {
+	result := map[string]interface{}{}
+	if err := yaml.Unmarshal(in, &result); err != nil {
+		return nil, fmt.Errorf("failed to deserialize: %w", err)
+	}
+	return result, nil
+}
+
+func servePath(path string, l *zap.Logger, w http.ResponseWriter, transform transform.TransformFunc) {
 	raw, err := ioutil.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -178,15 +199,20 @@ func servePath(path string, l *zap.Logger, w http.ResponseWriter) {
 		return
 	}
 
-	result := map[string]interface{}{}
-	if err := yaml.Unmarshal(raw, &result); err != nil {
-		http.Error(w, fmt.Sprintf("failed to deserialize contents of %s: %v", path, err), http.StatusInternalServerError)
+	if transform == nil {
+		transform = defaultTransform
+	}
+
+	result, err := transform(raw)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to transform: %v", err), http.StatusInternalServerError)
 		return
 	}
+
 	serializeAndWite(l, w, result)
 }
 
-func serveNamedObjectFromPath(path string, l *zap.Logger, w http.ResponseWriter, name string) {
+func serveNamedObjectFromPath(path string, l *zap.Logger, w http.ResponseWriter, name string, transform transform.TransformFunc) {
 	raw, err := ioutil.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -205,12 +231,29 @@ func serveNamedObjectFromPath(path string, l *zap.Logger, w http.ResponseWriter,
 		return
 	}
 	for _, item := range result.Items {
-		if item.GetName() == name {
-			serializeAndWite(l, w, item.Object)
+		if item.GetName() != name {
+			continue
+		}
+		obj, err := transformIfNeeded(item.Object, transform)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to transform object: %v", err), http.StatusInternalServerError)
 			return
 		}
+		serializeAndWite(l, w, obj)
+		return
 	}
 	w.WriteHeader(404)
+}
+
+func transformIfNeeded(object interface{}, transform transform.TransformFunc) (interface{}, error) {
+	if transform == nil {
+		return object, nil
+	}
+	serialized, err := json.Marshal(object)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize to json before transforming: %v", err)
+	}
+	return transform(serialized)
 }
 
 func serializeAndWite(l *zap.Logger, w http.ResponseWriter, data interface{}) {
@@ -223,4 +266,8 @@ func serializeAndWite(l *zap.Logger, w http.ResponseWriter, data interface{}) {
 	if _, err := w.Write(serialized); err != nil {
 		l.Error("failed to write object", zap.Error(err))
 	}
+}
+
+func acceptsTable(r *http.Request) bool {
+	return len(r.Header["Accept"]) > 0 && strings.Contains(r.Header["Accept"][0], "as=Table")
 }
