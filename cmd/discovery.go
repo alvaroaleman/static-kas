@@ -98,9 +98,18 @@ func discover(basePath string) (map[string]*metav1.APIResourceList, error) {
 
 			lock.Lock()
 			defer lock.Unlock()
+
 			if _, hasEntry := result[groupVersion]; !hasEntry {
 				result[groupVersion] = &metav1.APIResourceList{
 					GroupVersion: groupVersion,
+				}
+				if groupVersion == "v1" {
+					result[groupVersion].APIResources = append(result[groupVersion].APIResources, metav1.APIResource{
+						Name:       "namespaces",
+						Kind:       "Namespace",
+						Verbs:      []string{"get", "list"},
+						ShortNames: []string{"ns"},
+					})
 				}
 			}
 			for _, resource := range result[groupVersion].APIResources {

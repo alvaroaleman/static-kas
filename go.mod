@@ -5,6 +5,7 @@ go 1.17
 require (
 	github.com/gorilla/mux v1.8.0
 	go.uber.org/zap v1.21.0
+	k8s.io/api v0.23.4
 	k8s.io/apimachinery v0.23.4
 	sigs.k8s.io/yaml v1.3.0
 )

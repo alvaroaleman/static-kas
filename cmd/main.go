@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
@@ -56,6 +58,18 @@ func main() {
 	if err != nil {
 		l.Fatal("failed to serialize api group list", zap.Error(err))
 	}
+	allNamespaces := corev1.NamespaceList{TypeMeta: metav1.TypeMeta{Kind: "List"}}
+	namespacePath := filepath.Join(o.baseDir, "namespaces")
+	namespacesDirEntries, err := os.ReadDir(namespacePath)
+	if err != nil {
+		l.Fatal("failed to read namespaces folder", zap.String("path", namespacePath), zap.Error(err))
+	}
+	for _, entry := range namespacesDirEntries {
+		allNamespaces.Items = append(allNamespaces.Items, corev1.Namespace{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+			ObjectMeta: metav1.ObjectMeta{Name: entry.Name()},
+		})
+	}
 	l.Info("Finished discovering api resources")
 
 	router := mux.NewRouter()
@@ -98,6 +112,11 @@ func main() {
 	router.HandleFunc("/api/v1/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
+		// Special snowflake, they are not being dumped by must-gather
+		if vars["resource"] == "namespaces" {
+			serializeAndWite(l, w, allNamespaces)
+			return
+		}
 		path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
 		servePath(path, l, w)
 	})
