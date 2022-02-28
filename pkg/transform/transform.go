@@ -1,15 +1,20 @@
 package transform
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	api "k8s.io/api/core/v1"
 	corev1 "k8s.io/api/core/v1"
+	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/duration"
+	utilpointer "k8s.io/utils/pointer"
 	"sigs.k8s.io/yaml"
 )
 
@@ -63,6 +68,45 @@ func NewTableTransformMap() map[TransformEntryKey]TransformFunc {
 	result[TransformEntryKey{ResourceName: "pods", Verb: VerbList}] = transform(podColumnDefinitions, printPodList)
 	result[TransformEntryKey{ResourceName: "pods", Verb: VerbGet}] = transform(podColumnDefinitions, printPodFromRaw)
 
+	deploymentColumnDefinitions := []metav1.TableColumnDefinition{
+		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
+		{Name: "Ready", Type: "string", Description: "Number of the pod with ready state"},
+		{Name: "Up-to-date", Type: "string", Description: extensionsv1beta1.DeploymentStatus{}.SwaggerDoc()["updatedReplicas"]},
+		{Name: "Available", Type: "string", Description: extensionsv1beta1.DeploymentStatus{}.SwaggerDoc()["availableReplicas"]},
+		{Name: "Age", Type: "string", Description: metav1.ObjectMeta{}.SwaggerDoc()["creationTimestamp"]},
+		{Name: "Containers", Type: "string", Priority: 1, Description: "Names of each container in the template."},
+		{Name: "Images", Type: "string", Priority: 1, Description: "Images referenced by each container in the template."},
+		{Name: "Selector", Type: "string", Priority: 1, Description: extensionsv1beta1.DeploymentSpec{}.SwaggerDoc()["selector"]},
+	}
+	result[TransformEntryKey{GroupName: "apps", ResourceName: "deployments", Verb: VerbList}] = transform(deploymentColumnDefinitions, printDeploymentList)
+	result[TransformEntryKey{GroupName: "apps", ResourceName: "deployments", Verb: VerbGet}] = transform(deploymentColumnDefinitions, printDeploymentFromRaw)
+
+	statefulSetColumnDefinitions := []metav1.TableColumnDefinition{
+		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
+		{Name: "Ready", Type: "string", Description: "Number of the pod with ready state"},
+		{Name: "Age", Type: "string", Description: metav1.ObjectMeta{}.SwaggerDoc()["creationTimestamp"]},
+		{Name: "Containers", Type: "string", Priority: 1, Description: "Names of each container in the template."},
+		{Name: "Images", Type: "string", Priority: 1, Description: "Images referenced by each container in the template."},
+	}
+	result[TransformEntryKey{GroupName: "apps", ResourceName: "statefulsets", Verb: VerbList}] = transform(statefulSetColumnDefinitions, printStatefulSetList)
+	result[TransformEntryKey{GroupName: "apps", ResourceName: "statefulsets", Verb: VerbGet}] = transform(statefulSetColumnDefinitions, printStatefulSetFromRaw)
+
+	daemonSetColumnDefinitions := []metav1.TableColumnDefinition{
+		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
+		{Name: "Desired", Type: "integer", Description: extensionsv1beta1.DaemonSetStatus{}.SwaggerDoc()["desiredNumberScheduled"]},
+		{Name: "Current", Type: "integer", Description: extensionsv1beta1.DaemonSetStatus{}.SwaggerDoc()["currentNumberScheduled"]},
+		{Name: "Ready", Type: "integer", Description: extensionsv1beta1.DaemonSetStatus{}.SwaggerDoc()["numberReady"]},
+		{Name: "Up-to-date", Type: "integer", Description: extensionsv1beta1.DaemonSetStatus{}.SwaggerDoc()["updatedNumberScheduled"]},
+		{Name: "Available", Type: "integer", Description: extensionsv1beta1.DaemonSetStatus{}.SwaggerDoc()["numberAvailable"]},
+		{Name: "Node Selector", Type: "string", Description: corev1.PodSpec{}.SwaggerDoc()["nodeSelector"]},
+		{Name: "Age", Type: "string", Description: metav1.ObjectMeta{}.SwaggerDoc()["creationTimestamp"]},
+		{Name: "Containers", Type: "string", Priority: 1, Description: "Names of each container in the template."},
+		{Name: "Images", Type: "string", Priority: 1, Description: "Images referenced by each container in the template."},
+		{Name: "Selector", Type: "string", Priority: 1, Description: extensionsv1beta1.DaemonSetSpec{}.SwaggerDoc()["selector"]},
+	}
+	result[TransformEntryKey{GroupName: "apps", ResourceName: "daemonsets", Verb: VerbList}] = transform(daemonSetColumnDefinitions, printDaemonSetListFromRaw)
+	result[TransformEntryKey{GroupName: "apps", ResourceName: "daemonsets", Verb: VerbGet}] = transform(daemonSetColumnDefinitions, printDaemonSetFromRaw)
+
 	return result
 }
 
@@ -81,6 +125,9 @@ func printPodList(podListRaw []byte) ([]metav1.TableRow, error) {
 	}
 	return rows, nil
 }
+
+// This is passed throgh within the upstream code but there is no request option for this, so do the simple thing and always return it.
+var options = TablePrinterOptions{Wide: true}
 
 func printPodFromRaw(podRaw []byte) ([]metav1.TableRow, error) {
 	pod := corev1.Pod{}
@@ -197,7 +244,6 @@ func printPod(pod *corev1.Pod) ([]metav1.TableRow, error) {
 	}
 
 	row.Cells = append(row.Cells, pod.Name, fmt.Sprintf("%d/%d", readyContainers, totalContainers), reason, restartsStr, translateTimestampSince(pod.CreationTimestamp))
-	options := TablePrinterOptions{}
 	if options.Wide {
 		nodeName := pod.Spec.NodeName
 		nominatedNodeName := pod.Status.NominatedNodeName
@@ -265,4 +311,155 @@ func translateTimestampSince(timestamp metav1.Time) string {
 type TablePrinterOptions struct {
 	NoHeaders bool
 	Wide      bool
+}
+
+func printDeploymentFromRaw(raw []byte) ([]metav1.TableRow, error) {
+	var dep appsv1.Deployment
+	if err := yaml.Unmarshal(raw, &dep); err != nil {
+		return nil, err
+	}
+	return printDeployment(&dep)
+}
+
+func printDeployment(obj *appsv1.Deployment) ([]metav1.TableRow, error) {
+	row := metav1.TableRow{
+		Object: runtime.RawExtension{Object: obj},
+	}
+	desiredReplicas := utilpointer.Int32Deref(obj.Spec.Replicas, 0)
+	updatedReplicas := obj.Status.UpdatedReplicas
+	readyReplicas := obj.Status.ReadyReplicas
+	availableReplicas := obj.Status.AvailableReplicas
+	age := translateTimestampSince(obj.CreationTimestamp)
+	containers := obj.Spec.Template.Spec.Containers
+	selector, err := metav1.LabelSelectorAsSelector(obj.Spec.Selector)
+	selectorString := ""
+	if err != nil {
+		selectorString = "<invalid>"
+	} else {
+		selectorString = selector.String()
+	}
+	row.Cells = append(row.Cells, obj.Name, fmt.Sprintf("%d/%d", int64(readyReplicas), int64(desiredReplicas)), int64(updatedReplicas), int64(availableReplicas), age)
+	if options.Wide {
+		containers, images := layoutContainerCells(containers)
+		row.Cells = append(row.Cells, containers, images, selectorString)
+	}
+	return []metav1.TableRow{row}, nil
+}
+
+func printDeploymentList(listRaw []byte) ([]metav1.TableRow, error) {
+	var list appsv1.DeploymentList
+	if err := yaml.Unmarshal(listRaw, &list); err != nil {
+		return nil, err
+	}
+	rows := make([]metav1.TableRow, 0, len(list.Items))
+	for i := range list.Items {
+		r, err := printDeployment(&list.Items[i])
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, r...)
+	}
+	return rows, nil
+}
+
+// Lay out all the containers on one line if use wide output.
+func layoutContainerCells(containers []api.Container) (names string, images string) {
+	var namesBuffer bytes.Buffer
+	var imagesBuffer bytes.Buffer
+
+	for i, container := range containers {
+		namesBuffer.WriteString(container.Name)
+		imagesBuffer.WriteString(container.Image)
+		if i != len(containers)-1 {
+			namesBuffer.WriteString(",")
+			imagesBuffer.WriteString(",")
+		}
+	}
+	return namesBuffer.String(), imagesBuffer.String()
+}
+
+func printStatefulSetFromRaw(raw []byte) ([]metav1.TableRow, error) {
+	var sst appsv1.StatefulSet
+	if err := yaml.Unmarshal(raw, &sst); err != nil {
+		return nil, err
+	}
+	return printStatefulSet(&sst)
+}
+
+func printStatefulSet(obj *appsv1.StatefulSet) ([]metav1.TableRow, error) {
+	row := metav1.TableRow{
+		Object: runtime.RawExtension{Object: obj},
+	}
+	desiredReplicas := utilpointer.Int32Deref(obj.Spec.Replicas, 0)
+	readyReplicas := obj.Status.ReadyReplicas
+	createTime := translateTimestampSince(obj.CreationTimestamp)
+	row.Cells = append(row.Cells, obj.Name, fmt.Sprintf("%d/%d", int64(readyReplicas), int64(desiredReplicas)), createTime)
+	if options.Wide {
+		names, images := layoutContainerCells(obj.Spec.Template.Spec.Containers)
+		row.Cells = append(row.Cells, names, images)
+	}
+	return []metav1.TableRow{row}, nil
+}
+
+func printStatefulSetList(listRaw []byte) ([]metav1.TableRow, error) {
+	list := appsv1.StatefulSetList{}
+	if err := yaml.Unmarshal(listRaw, &list); err != nil {
+		return nil, err
+	}
+	rows := make([]metav1.TableRow, 0, len(list.Items))
+	for i := range list.Items {
+		r, err := printStatefulSet(&list.Items[i])
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, r...)
+	}
+	return rows, nil
+}
+
+func printDaemonSetFromRaw(raw []byte) ([]metav1.TableRow, error) {
+	ds := appsv1.DaemonSet{}
+	if err := yaml.Unmarshal(raw, &ds); err != nil {
+		return nil, err
+	}
+	return printDaemonSet(&ds)
+}
+
+func printDaemonSet(obj *appsv1.DaemonSet) ([]metav1.TableRow, error) {
+	row := metav1.TableRow{
+		Object: runtime.RawExtension{Object: obj},
+	}
+
+	desiredScheduled := obj.Status.DesiredNumberScheduled
+	currentScheduled := obj.Status.CurrentNumberScheduled
+	numberReady := obj.Status.NumberReady
+	numberUpdated := obj.Status.UpdatedNumberScheduled
+	numberAvailable := obj.Status.NumberAvailable
+
+	row.Cells = append(row.Cells, obj.Name, int64(desiredScheduled), int64(currentScheduled), int64(numberReady), int64(numberUpdated), int64(numberAvailable), labels.FormatLabels(obj.Spec.Template.Spec.NodeSelector), translateTimestampSince(obj.CreationTimestamp))
+	if options.Wide {
+		names, images := layoutContainerCells(obj.Spec.Template.Spec.Containers)
+		row.Cells = append(row.Cells, names, images, metav1.FormatLabelSelector(obj.Spec.Selector))
+	}
+	return []metav1.TableRow{row}, nil
+}
+
+func printDaemonSetListFromRaw(raw []byte) ([]metav1.TableRow, error) {
+	list := appsv1.DaemonSetList{}
+	if err := yaml.Unmarshal(raw, &list); err != nil {
+		return nil, err
+	}
+	return printDaemonSetList(&list)
+}
+
+func printDaemonSetList(list *appsv1.DaemonSetList) ([]metav1.TableRow, error) {
+	rows := make([]metav1.TableRow, 0, len(list.Items))
+	for i := range list.Items {
+		r, err := printDaemonSet(&list.Items[i])
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, r...)
+	}
+	return rows, nil
 }

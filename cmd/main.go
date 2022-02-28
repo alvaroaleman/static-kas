@@ -151,14 +151,22 @@ func main() {
 	router.HandleFunc("/apis/{group}/{version}/namespaces/{namespace}/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
+		var transformFunc func([]byte) (interface{}, error)
+		if acceptsTable(r) {
+			transformFunc = tableTransformMap[transform.TransformEntryKey{GroupName: vars["group"], ResourceName: vars["resource"], Verb: transform.VerbList}]
+		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
-		servePath(path, l, w, nil)
+		servePath(path, l, w, transformFunc)
 	})
 	router.HandleFunc("/apis/{group}/{version}/namespaces/{namespace}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
+		var transformFunc func([]byte) (interface{}, error)
+		if acceptsTable(r) {
+			transformFunc = tableTransformMap[transform.TransformEntryKey{GroupName: vars["group"], ResourceName: vars["resource"], Verb: transform.VerbGet}]
+		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
-		serveNamedObjectFromPath(path, l, w, vars["name"], nil)
+		serveNamedObjectFromPath(path, l, w, vars["name"], transformFunc)
 	})
 	router.HandleFunc("/apis/{group}/{version}/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
