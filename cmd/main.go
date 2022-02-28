@@ -71,6 +71,12 @@ func main() {
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core", vars["resource"]+".yaml")
 		serverPath(path, l, w)
 	})
+	router.HandleFunc("/api/v1/{resource}", func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		l := l.With(zap.String("path", r.URL.Path))
+		path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
+		serverPath(path, l, w)
+	})
 	router.HandleFunc("/apis", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(serializedGroupList)
 	})
@@ -84,6 +90,12 @@ func main() {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
+		serverPath(path, l, w)
+	})
+	router.HandleFunc("/apis/{group}/{version}/{resource}", func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		l := l.With(zap.String("path", r.URL.Path))
+		path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"], vars["resource"]+".yaml")
 		serverPath(path, l, w)
 	})
 
