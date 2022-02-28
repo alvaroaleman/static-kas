@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -76,6 +77,23 @@ func main() {
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core", vars["resource"]+".yaml")
 		serveNamedObjectFromPath(path, l, w, vars["name"])
+	})
+	router.HandleFunc("/api/v1/namespaces/{namespace}/pods/{name}/log", func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		containerName := r.URL.Query().Get("container")
+		fileName := "current.log"
+		if r.URL.Query().Get("previous") == "true" {
+			fileName = "previous.log"
+		}
+		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "pods", vars["name"], containerName, containerName, "logs", fileName)
+		f, err := os.Open(path)
+		if err != nil {
+			w.WriteHeader(404)
+			w.Write([]byte(fmt.Sprintf("failed to open %s: %v", path, err)))
+			return
+		}
+		defer f.Close()
+		io.Copy(w, f)
 	})
 	router.HandleFunc("/api/v1/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
