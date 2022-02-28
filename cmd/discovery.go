@@ -15,6 +15,36 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+func apiGroupList(rl map[string]*metav1.APIResourceList) (*metav1.APIGroupList, error) {
+	result := &metav1.APIGroupList{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "APIGroupList",
+			APIVersion: "v1",
+		},
+	}
+	for groupVersion := range rl {
+		if groupVersion == "v1" {
+			continue
+		}
+		split := strings.Split(groupVersion, "/")
+		if len(split) != 2 {
+			return nil, fmt.Errorf("groupVErsion %q does not yield exactly two result when slash splitting", groupVersion)
+		}
+
+		// TODO: This assumes there is never more than one version, is this safe?
+		group, version := split[0], split[1]
+		result.Groups = append(result.Groups, metav1.APIGroup{
+			Name: group,
+			Versions: []metav1.GroupVersionForDiscovery{{
+				GroupVersion: groupVersion,
+				Version:      version,
+			}},
+		})
+	}
+
+	return result, nil
+}
+
 func serializeAPIResourceList(rl map[string]*metav1.APIResourceList) (map[string][]byte, error) {
 	result := make(map[string][]byte, len(rl))
 	for k, v := range rl {

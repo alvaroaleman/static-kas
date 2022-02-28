@@ -9,7 +9,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/julienschmidt/httprouter"
+	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -47,42 +47,70 @@ func main() {
 	if err != nil {
 		l.Fatal("failed to serialize apiresources", zap.Error(err))
 	}
+	groupList, err := apiGroupList(groupResourceListMap)
+	if err != nil {
+		l.Fatal("failed to construct api group list", zap.Error(err))
+	}
+	serializedGroupList, err := json.Marshal(groupList)
+	if err != nil {
+		l.Fatal("failed to serialize api group list", zap.Error(err))
+	}
 	l.Info("Finished discovering api resources")
 
-	router := httprouter.New()
-	router.GET("/api", func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+	router := mux.NewRouter()
+	router.HandleFunc("/api", func(w http.ResponseWriter, _ *http.Request) {
 		d := metav1.APIVersions{TypeMeta: metav1.TypeMeta{Kind: "APIVersions"}, Versions: []string{"v1"}}
 		serializeAndWite(l, w, d)
 	})
-	router.GET("/api/v1", func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+	router.HandleFunc("/api/v1", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(groupSerializedResourceListMap["v1"])
 	})
-	router.GET("/api/v1/namespaces/:namespace/pods", func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+	router.HandleFunc("/api/v1/namespaces/{namespace}/{resource}", func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
-
-		path := path.Join(o.baseDir, "namespaces", p.ByName("namespace"), "core", "pods.yaml")
-		raw, err := ioutil.ReadFile(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				l.Info("file not found", zap.String("path", path))
-				serializeAndWite(l, w, unstructured.UnstructuredList{})
-				return
-			}
-			http.Error(w, fmt.Sprintf("failed to read %s: %v", path, err), http.StatusInternalServerError)
-			return
-		}
-
-		result := map[string]interface{}{}
-		if err := yaml.Unmarshal(raw, &result); err != nil {
-			http.Error(w, fmt.Sprintf("failed to deserialize contents of %s: %v", path, err), http.StatusInternalServerError)
-			return
-		}
-		serializeAndWite(l, w, result)
+		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core", vars["resource"]+".yaml")
+		serverPath(path, l, w)
+	})
+	router.HandleFunc("/apis", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(serializedGroupList)
+	})
+	for groupVersion := range groupSerializedResourceListMap {
+		groupVersion := groupVersion
+		router.HandleFunc("/apis/"+groupVersion, func(w http.ResponseWriter, _ *http.Request) {
+			w.Write(groupSerializedResourceListMap[groupVersion])
+		})
+	}
+	router.HandleFunc("/apis/{group}/{version}/namespaces/{namespace}/{resource}", func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		l := l.With(zap.String("path", r.URL.Path))
+		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
+		serverPath(path, l, w)
 	})
 
 	if err := http.ListenAndServe(":8080", router); err != nil {
 		l.Error("server ended", zap.Error(err))
 	}
+}
+
+func serverPath(path string, l *zap.Logger, w http.ResponseWriter) {
+	raw, err := ioutil.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			l.Info("file not found", zap.String("path", path))
+			w.WriteHeader(404)
+			serializeAndWite(l, w, unstructured.UnstructuredList{})
+			return
+		}
+		http.Error(w, fmt.Sprintf("failed to read %s: %v", path, err), http.StatusInternalServerError)
+		return
+	}
+
+	result := map[string]interface{}{}
+	if err := yaml.Unmarshal(raw, &result); err != nil {
+		http.Error(w, fmt.Sprintf("failed to deserialize contents of %s: %v", path, err), http.StatusInternalServerError)
+		return
+	}
+	serializeAndWite(l, w, result)
 }
 
 func serializeAndWite(l *zap.Logger, w http.ResponseWriter, data interface{}) {
