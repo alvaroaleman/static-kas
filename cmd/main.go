@@ -93,7 +93,7 @@ func main() {
 		if acceptsTable(r) {
 			transformFunc = tableTransformMap[transform.TransformEntryKey{ResourceName: vars["resource"], Verb: transform.VerbList}]
 		}
-		servePath(path, l, w, transformFunc)
+		servePath(path, l, w, transformFunc, filterForFieldSelector(r.URL.Query()["fieldSelector"]))
 	})
 	router.HandleFunc("/api/v1/namespaces/{namespace}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -131,7 +131,7 @@ func main() {
 			return
 		}
 		path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
-		servePath(path, l, w, nil)
+		servePath(path, l, w, nil, filterForFieldSelector(r.URL.Query()["fieldSelector"]))
 	})
 	router.HandleFunc("/api/v1/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -156,7 +156,7 @@ func main() {
 			transformFunc = tableTransformMap[transform.TransformEntryKey{GroupName: vars["group"], ResourceName: vars["resource"], Verb: transform.VerbList}]
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
-		servePath(path, l, w, transformFunc)
+		servePath(path, l, w, transformFunc, filterForFieldSelector(r.URL.Query()["fieldSelector"]))
 	})
 	router.HandleFunc("/apis/{group}/{version}/namespaces/{namespace}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -194,7 +194,7 @@ func defaultTransform(in []byte) (interface{}, error) {
 	return result, nil
 }
 
-func servePath(path string, l *zap.Logger, w http.ResponseWriter, transform transform.TransformFunc) {
+func servePath(path string, l *zap.Logger, w http.ResponseWriter, transform transform.TransformFunc, filter ...filter) {
 	raw, err := ioutil.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -205,6 +205,14 @@ func servePath(path string, l *zap.Logger, w http.ResponseWriter, transform tran
 		}
 		http.Error(w, fmt.Sprintf("failed to read %s: %v", path, err), http.StatusInternalServerError)
 		return
+	}
+
+	for _, filter := range filter {
+		raw, err = filter(raw)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("filter failed: %v", err), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	if transform == nil {
@@ -218,6 +226,50 @@ func servePath(path string, l *zap.Logger, w http.ResponseWriter, transform tran
 	}
 
 	serializeAndWite(l, w, result)
+}
+
+type filter func([]byte) ([]byte, error)
+
+func filterForFieldSelector(value []string) func([]byte) ([]byte, error) {
+	selectorMap := make(map[string]string, len(value))
+	return func(list []byte) ([]byte, error) {
+		if len(value) == 0 {
+			return list, nil
+		}
+		var sanitizedValues []string
+		for _, item := range value {
+			sanitizedValues = append(strings.Split(item, ","))
+		}
+		for _, entry := range sanitizedValues {
+			split := strings.Split(entry, "=")
+			if len(split) != 2 {
+				return nil, fmt.Errorf("field selector expression %s split by = doesn't yield exactly two results", entry)
+			}
+			selectorMap[split[0]] = split[1]
+		}
+
+		l := &unstructured.UnstructuredList{}
+		if err := yaml.Unmarshal(list, l); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal data into list: %w", err)
+		}
+		result := &unstructured.UnstructuredList{}
+		result.SetGroupVersionKind(l.GroupVersionKind())
+
+		for _, item := range l.Items {
+			matches := true
+			for k, v := range selectorMap {
+				if value, _, _ := unstructured.NestedString(item.Object, strings.Split(k, ".")...); value != v {
+					matches = false
+					break
+				}
+			}
+			if matches {
+				result.Items = append(result.Items, *item.DeepCopy())
+			}
+		}
+
+		return json.Marshal(result)
+	}
 }
 
 func serveNamedObjectFromPath(path string, l *zap.Logger, w http.ResponseWriter, name string, transform transform.TransformFunc) {
