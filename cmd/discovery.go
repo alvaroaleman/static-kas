@@ -83,17 +83,48 @@ func discover(basePath string) (map[string]*metav1.APIResourceList, error) {
 				return
 			}
 
-			unstructuredList := unstructured.UnstructuredList{}
-			if err := yaml.Unmarshal(raw, &unstructuredList); err != nil {
-				errs.add(fmt.Errorf("failed to decode %s into an unstructuredList: %w", path, err))
+			u := &unstructured.Unstructured{}
+			if err := yaml.Unmarshal(raw, u); err != nil {
+				errs.add(fmt.Errorf("failed to decode %s into an unstructured: %w", path, err))
 				return
 			}
-			if len(unstructuredList.Items) < 1 {
+			items, found, err := unstructured.NestedSlice(u.Object, "items")
+			if err != nil {
+				// It's a list but has no entries
+				if err.Error() == ".items accessor error: <nil> is of the type <nil>, expected []interface{}" {
+					return
+				}
+				errs.add(fmt.Errorf("items field for file %s was not a slice: %w", path, err))
 				return
 			}
-			name := strings.TrimSuffix(d.Name(), ".yaml")
-			kind := unstructuredList.Items[0].GetKind()
-			groupVersion := unstructuredList.Items[0].GetAPIVersion()
+
+			var name, kind, groupVersion string
+			if found {
+				if len(items) < 1 {
+					return
+				}
+				// If we find a list, the resouce name is simply the filename without the yaml suffix
+				name = strings.TrimSuffix(d.Name(), ".yaml")
+				kind, _, _ = unstructured.NestedString(items[0].(map[string]interface{}), "kind")
+				groupVersion, _, _ = unstructured.NestedString(items[0].(map[string]interface{}), "apiVersion")
+			} else {
+				pathElements := strings.Split(path, "/")
+				// Should never happen(tm)
+				if len(pathElements) < 2 {
+					return
+				}
+				fileNameWithoutSuffix := strings.TrimSuffix(d.Name(), ".yaml")
+				// If we find a single object, the resource name is the name of the first parent folder that is not also the name
+				// of the object (pods are nested in a pods/$podname/$podname.yaml structure for some reason)
+				for i := len(pathElements) - 2; i > 0; i-- {
+					if pathElements[i] != fileNameWithoutSuffix {
+						name = pathElements[i]
+						break
+					}
+				}
+				kind = u.GetKind()
+				groupVersion = u.GetAPIVersion()
+			}
 			namespaced := strings.Contains(path, "namespaces/")
 
 			lock.Lock()
