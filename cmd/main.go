@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
@@ -19,6 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"sigs.k8s.io/yaml"
 
 	"github.com/alvaroaleman/static-kas/pkg/transform"
@@ -46,7 +48,7 @@ func main() {
 	}
 
 	l.Info("Discovering api resources")
-	groupResourceListMap, err := discover(o.baseDir)
+	groupResourceListMap, groupResourceMap, err := discover(o.baseDir)
 	if err != nil {
 		l.Fatal("failed to discover apis", zap.Error(err))
 	}
@@ -138,8 +140,18 @@ func main() {
 			serializeAndWite(l, w, allNamespaces)
 			return
 		}
-		path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
-		servePath(path, l, w, nil, filterForFieldSelector(r.URL.Query()["fieldSelector"]))
+		var transformFunc func([]byte) (interface{}, error)
+		if acceptsTable(r) {
+			transformFunc = tableTransformMap[transform.TransformEntryKey{ResourceName: vars["resource"], Verb: transform.VerbList}]
+		}
+		if groupResourceMap[groupVersionResource{groupVersion: "v1", resource: vars["resource"]}].Namespaced {
+			basePath := filepath.Join(o.baseDir, "namespaces")
+			suffix := filepath.Join("core", vars["resource"]+".yaml")
+			namespacedResourceForAllNamespaces(basePath, &allNamespaces, suffix, l, w, transformFunc)
+		} else {
+			path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
+			servePath(path, l, w, transformFunc, filterForFieldSelector(r.URL.Query()["fieldSelector"]))
+		}
 	})
 	router.HandleFunc("/api/v1/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -187,8 +199,18 @@ func main() {
 			handleSSAR(l, w, r)
 			return
 		}
-		path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"], vars["resource"]+".yaml")
-		servePath(path, l, w, nil)
+		var transformFunc func([]byte) (interface{}, error)
+		if acceptsTable(r) {
+			transformFunc = tableTransformMap[transform.TransformEntryKey{GroupName: vars["group"], ResourceName: vars["resource"], Verb: transform.VerbList}]
+		}
+		if groupResourceMap[groupVersionResource{groupVersion: vars["group"] + "/" + vars["version"], resource: vars["resource"]}].Namespaced {
+			basePath := filepath.Join(o.baseDir, "namespaces")
+			suffix := filepath.Join(vars["group"], vars["resource"]+".yaml")
+			namespacedResourceForAllNamespaces(basePath, &allNamespaces, suffix, l, w, transformFunc)
+		} else {
+			path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"], vars["resource"]+".yaml")
+			servePath(path, l, w, transformFunc)
+		}
 	})
 	router.HandleFunc("/apis/{group}/{version}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -376,4 +398,74 @@ func serveNamespace(l *zap.Logger, w http.ResponseWriter, namespaceList *corev1.
 	}
 
 	w.WriteHeader(404)
+}
+
+func namespacedResourceForAllNamespaces(
+	basePath string,
+	namespaces *corev1.NamespaceList,
+	suffix string,
+	l *zap.Logger,
+	w http.ResponseWriter,
+	transform transform.TransformFunc,
+) {
+
+	errs := errorGroup{}
+	var lists []*unstructured.UnstructuredList
+	lock := sync.Mutex{}
+	wg := sync.WaitGroup{}
+	wg.Add(len(namespaces.Items))
+
+	for _, ns := range namespaces.Items {
+		ns := ns
+		go func() {
+			defer wg.Done()
+			path := filepath.Join(basePath, ns.Name, suffix)
+			raw, err := ioutil.ReadFile(path)
+			if err != nil {
+				if !os.IsNotExist(err) {
+					errs.add(fmt.Errorf("failed to read %s: %v", path, err))
+				}
+				return
+			}
+			list := &unstructured.UnstructuredList{}
+			if err := yaml.Unmarshal(raw, list); err != nil {
+				errs.add(fmt.Errorf("failed to deserialize %s into a list: %w", path, err))
+				return
+			}
+
+			lock.Lock()
+			defer lock.Unlock()
+			lists = append(lists, list)
+		}()
+	}
+	wg.Wait()
+
+	if err := utilerrors.NewAggregate(errs.errs); err != nil {
+		// If there is no result, bail out. If we have both errors and results, just
+		// log the error but continue.
+		if len(lists) == 0 {
+			http.Error(w, fmt.Sprintf("failed to get data: %v", err), http.StatusInternalServerError)
+			return
+		} else {
+			l.Error("Encountered errors when reading data", zap.Error(err))
+		}
+	}
+
+	if len(lists) == 0 {
+		return
+	}
+
+	result := &unstructured.UnstructuredList{}
+	result.SetGroupVersionKind(lists[0].GroupVersionKind())
+	for _, list := range lists {
+		result.Items = append(result.Items, list.Items...)
+	}
+
+	transformed, err := transformIfNeeded(result, transform)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("transform failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	serializeAndWite(l, w, transformed)
 }

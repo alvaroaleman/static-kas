@@ -58,9 +58,10 @@ func serializeAPIResourceList(rl map[string]*metav1.APIResourceList) (map[string
 	return result, nil
 }
 
-func discover(basePath string) (map[string]*metav1.APIResourceList, error) {
+func discover(basePath string) (map[string]*metav1.APIResourceList, map[groupVersionResource]metav1.APIResource, error) {
 	errs := errorGroup{}
 	result := map[string]*metav1.APIResourceList{}
+	apiResources := map[groupVersionResource]metav1.APIResource{}
 	lock := sync.Mutex{}
 	wg := sync.WaitGroup{}
 
@@ -150,21 +151,22 @@ func discover(basePath string) (map[string]*metav1.APIResourceList, error) {
 				}
 			}
 
-			result[groupVersion].APIResources = append(result[groupVersion].APIResources, metav1.APIResource{
-				// TODO: Shortnames, this will required a hardcoded name -> shortnames mapping
+			resource := metav1.APIResource{
 				Name:       name,
 				Namespaced: namespaced,
 				Kind:       kind,
 				Verbs:      []string{"get", "list"},
 				ShortNames: shortNameMapping[name],
-			})
+			}
+			result[groupVersion].APIResources = append(result[groupVersion].APIResources, resource)
+			apiResources[groupVersionResource{groupVersion: groupVersion, resource: name}] = resource
 		}()
 
 		return nil
 	})
 
 	wg.Wait()
-	return result, utilerrors.NewAggregate(errs.errs)
+	return result, apiResources, utilerrors.NewAggregate(errs.errs)
 }
 
 type errorGroup struct {
@@ -176,4 +178,9 @@ func (e *errorGroup) add(err error) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	e.errs = append(e.errs, err)
+}
+
+type groupVersionResource struct {
+	groupVersion string
+	resource     string
 }
