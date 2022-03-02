@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -78,6 +79,13 @@ func main() {
 	tableTransformMap := transform.NewTableTransformMap()
 
 	router := mux.NewRouter()
+	router.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		l.With(zap.String("path", r.URL.Path)).Info("Got request for unhandled path")
+		w.WriteHeader(404)
+	})
+	router.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{}`))
+	})
 	router.HandleFunc("/api", func(w http.ResponseWriter, _ *http.Request) {
 		d := metav1.APIVersions{TypeMeta: metav1.TypeMeta{Kind: "APIVersions"}, Versions: []string{"v1"}}
 		serializeAndWite(l, w, d)
@@ -136,6 +144,10 @@ func main() {
 	router.HandleFunc("/api/v1/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
+		if vars["resource"] == "namespaces" {
+			serveNamespace(l, w, &allNamespaces, vars["name"])
+			return
+		}
 		path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
 		serveNamedObjectFromPath(path, l, w, vars["name"], nil)
 	})
@@ -171,6 +183,10 @@ func main() {
 	router.HandleFunc("/apis/{group}/{version}/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
+		if vars["group"] == "authorization.k8s.io" && vars["resource"] == "selfsubjectaccessreviews" {
+			handleSSAR(l, w, r)
+			return
+		}
 		path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"], vars["resource"]+".yaml")
 		servePath(path, l, w, nil)
 	})
@@ -330,4 +346,34 @@ func serializeAndWite(l *zap.Logger, w http.ResponseWriter, data interface{}) {
 
 func acceptsTable(r *http.Request) bool {
 	return len(r.Header["Accept"]) > 0 && strings.Contains(r.Header["Accept"][0], "as=Table")
+}
+
+func handleSSAR(l *zap.Logger, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(400)
+		w.Write([]byte(fmt.Sprintf("method %s is not supported, method %s must be used", r.Method, http.MethodPost)))
+		return
+	}
+
+	var ssar authorizationv1.SelfSubjectAccessReview
+	if err := json.NewDecoder(r.Body).Decode(&ssar); err != nil {
+		w.WriteHeader(400)
+		w.Write([]byte(fmt.Sprintf("failed to decode request body: %v", err)))
+		return
+	}
+	ssar.Status.Allowed = true
+	if err := json.NewEncoder(w).Encode(ssar); err != nil {
+		l.Error("failed to encode response", zap.Error(err))
+	}
+}
+
+func serveNamespace(l *zap.Logger, w http.ResponseWriter, namespaceList *corev1.NamespaceList, name string) {
+	for _, item := range namespaceList.Items {
+		if item.Name == name {
+			serializeAndWite(l, w, item)
+			return
+		}
+	}
+
+	w.WriteHeader(404)
 }

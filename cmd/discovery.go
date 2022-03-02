@@ -156,6 +156,7 @@ func discover(basePath string) (map[string]*metav1.APIResourceList, error) {
 				Namespaced: namespaced,
 				Kind:       kind,
 				Verbs:      []string{"get", "list"},
+				ShortNames: shortNameMapping[name],
 			})
 		}()
 
