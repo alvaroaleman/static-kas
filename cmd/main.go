@@ -94,10 +94,10 @@ func main() {
 	router.HandleFunc("/api", func(w http.ResponseWriter, _ *http.Request) {
 		d := metav1.APIVersions{TypeMeta: metav1.TypeMeta{Kind: "APIVersions"}, Versions: []string{"v1"}}
 		serializeAndWrite(l, w, d)
-	})
+	}).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(groupSerializedResourceListMap["v1"])
-	})
+	}).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/namespaces/{namespace}/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
@@ -107,7 +107,7 @@ func main() {
 			transformFunc = tableTransformMap[transform.TransformEntryKey{ResourceName: vars["resource"], Verb: transform.VerbList}]
 		}
 		servePath(path, l, w, transformFunc, filterForFieldSelector(r.URL.Query()["fieldSelector"]))
-	})
+	}).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/namespaces/{namespace}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
@@ -117,7 +117,7 @@ func main() {
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core", vars["resource"]+".yaml")
 		serveNamedObjectFromPath(path, l, w, vars["name"], transformFunc)
-	})
+	}).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/namespaces/{namespace}/pods/{name}/log", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		containerName := r.URL.Query().Get("container")
@@ -134,7 +134,7 @@ func main() {
 		}
 		defer f.Close()
 		io.Copy(w, f)
-	})
+	}).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
@@ -155,7 +155,7 @@ func main() {
 			path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
 			servePath(path, l, w, transformFunc, filterForFieldSelector(r.URL.Query()["fieldSelector"]))
 		}
-	})
+	}).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
@@ -165,15 +165,15 @@ func main() {
 		}
 		path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
 		serveNamedObjectFromPath(path, l, w, vars["name"], nil)
-	})
+	}).Methods(http.MethodGet)
 	router.HandleFunc("/apis", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(serializedGroupList)
-	})
+	}).Methods(http.MethodGet)
 	for groupVersion := range groupSerializedResourceListMap {
 		groupVersion := groupVersion
 		router.HandleFunc("/apis/"+groupVersion, func(w http.ResponseWriter, _ *http.Request) {
 			w.Write(groupSerializedResourceListMap[groupVersion])
-		})
+		}).Methods(http.MethodGet)
 	}
 	router.HandleFunc("/apis/{group}/{version}/namespaces/{namespace}/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -184,7 +184,7 @@ func main() {
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
 		servePath(path, l, w, transformFunc, filterForFieldSelector(r.URL.Query()["fieldSelector"]))
-	})
+	}).Methods(http.MethodGet)
 	router.HandleFunc("/apis/{group}/{version}/namespaces/{namespace}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
@@ -194,12 +194,15 @@ func main() {
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
 		serveNamedObjectFromPath(path, l, w, vars["name"], transformFunc)
-	})
+	}).Methods(http.MethodGet)
+	router.HandleFunc("/apis/authorization.k8s.io/{version}/selfsubjectaccessreviews", func(w http.ResponseWriter, r *http.Request) {
+		handleSSAR(l.With(zap.String("path", r.URL.Path)), w, r)
+	}).Methods(http.MethodPost)
 	router.HandleFunc("/apis/{group}/{version}/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		if vars["group"] == "authorization.k8s.io" && vars["resource"] == "selfsubjectaccessreviews" {
-			handleSSAR(l, w, r)
+			http.Error(w, fmt.Sprintf("this endpoint only supports POST"), http.StatusMethodNotAllowed)
 			return
 		}
 		var transformFunc func([]byte) (interface{}, error)
@@ -214,13 +217,13 @@ func main() {
 			path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"], vars["resource"]+".yaml")
 			servePath(path, l, w, transformFunc)
 		}
-	})
+	}).Methods(http.MethodGet)
 	router.HandleFunc("/apis/{group}/{version}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"], vars["resource"]+".yaml")
 		serveNamedObjectFromPath(path, l, w, vars["name"], nil)
-	})
+	}).Methods(http.MethodGet)
 
 	if err := http.ListenAndServe(":8080", router); err != nil {
 		l.Error("server ended", zap.Error(err))
@@ -374,12 +377,6 @@ func acceptsTable(r *http.Request) bool {
 }
 
 func handleSSAR(l *zap.Logger, w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.WriteHeader(400)
-		w.Write([]byte(fmt.Sprintf("method %s is not supported, method %s must be used", r.Method, http.MethodPost)))
-		return
-	}
-
 	var ssar authorizationv1.SelfSubjectAccessReview
 	if err := json.NewDecoder(r.Body).Decode(&ssar); err != nil {
 		w.WriteHeader(400)
