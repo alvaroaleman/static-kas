@@ -84,7 +84,20 @@ func readAndDeserializeList(parenDir, resourceName string) (*unstructured.Unstru
 	switch len(fileContents) {
 	case 0:
 		return result, nil
+	// Could be a list or a single item
 	case 1:
+		// Unmarshal into an unstructured first, because that is guaranteed
+		// to not cause issues even if we get a list, as it doesn't make any
+		// assumptions about structure (a list assumes there is a list under
+		// the .items field).
+		target := &unstructured.Unstructured{}
+		if err := yaml.Unmarshal(fileContents[0], target); err != nil {
+			return nil, err
+		}
+		if !strings.HasSuffix(target.GetKind(), "List") {
+			result.Items = []unstructured.Unstructured{*target}
+			return result, nil
+		}
 		return result, yaml.Unmarshal(fileContents[0], result)
 	default:
 		for _, fileContent := range fileContents {
