@@ -83,8 +83,6 @@ func main() {
 
 	router := mux.NewRouter()
 	router.Use(loggingMiddleware(l))
-	// Re-Define the not found handler so it goes through the middleware
-	router.NotFoundHandler = router.NewRoute().BuildOnly().HandlerFunc(http.NotFound).GetHandler()
 	router.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{}`))
 	})
@@ -250,6 +248,10 @@ func main() {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
+
+	// Re-Define the error handlers so they go through the middleware
+	router.NotFoundHandler = router.NewRoute().HandlerFunc(http.NotFound).GetHandler()
+	router.MethodNotAllowedHandler = router.NewRoute().HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "", http.StatusMethodNotAllowed) }).GetHandler()
 
 	if err := http.ListenAndServe(":8080", router); err != nil {
 		l.Error("server ended", zap.Error(err))
