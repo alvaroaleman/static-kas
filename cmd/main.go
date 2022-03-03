@@ -93,7 +93,7 @@ func main() {
 	})
 	router.HandleFunc("/api", func(w http.ResponseWriter, _ *http.Request) {
 		d := metav1.APIVersions{TypeMeta: metav1.TypeMeta{Kind: "APIVersions"}, Versions: []string{"v1"}}
-		serializeAndWite(l, w, d)
+		serializeAndWrite(l, w, d)
 	})
 	router.HandleFunc("/api/v1", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(groupSerializedResourceListMap["v1"])
@@ -140,7 +140,7 @@ func main() {
 		l := l.With(zap.String("path", r.URL.Path))
 		// Special snowflake, they are not being dumped by must-gather
 		if vars["resource"] == "namespaces" {
-			serializeAndWite(l, w, allNamespaces)
+			serializeAndWrite(l, w, allNamespaces)
 			return
 		}
 		var transformFunc func([]byte) (interface{}, error)
@@ -241,7 +241,7 @@ func servePath(path string, l *zap.Logger, w http.ResponseWriter, transform tran
 		if os.IsNotExist(err) {
 			l.Info("file not found", zap.String("path", path))
 			w.WriteHeader(404)
-			serializeAndWite(l, w, unstructured.UnstructuredList{})
+			serializeAndWrite(l, w, unstructured.UnstructuredList{})
 			return
 		}
 		http.Error(w, fmt.Sprintf("failed to read %s: %v", path, err), http.StatusInternalServerError)
@@ -266,7 +266,7 @@ func servePath(path string, l *zap.Logger, w http.ResponseWriter, transform tran
 		return
 	}
 
-	serializeAndWite(l, w, result)
+	serializeAndWrite(l, w, result)
 }
 
 type filter func([]byte) ([]byte, error)
@@ -319,7 +319,7 @@ func serveNamedObjectFromPath(path string, l *zap.Logger, w http.ResponseWriter,
 		if os.IsNotExist(err) {
 			l.Info("file not found", zap.String("path", path))
 			w.WriteHeader(404)
-			serializeAndWite(l, w, unstructured.UnstructuredList{})
+			serializeAndWrite(l, w, unstructured.UnstructuredList{})
 			return
 		}
 		http.Error(w, fmt.Sprintf("failed to read %s: %v", path, err), http.StatusInternalServerError)
@@ -340,7 +340,7 @@ func serveNamedObjectFromPath(path string, l *zap.Logger, w http.ResponseWriter,
 			http.Error(w, fmt.Sprintf("failed to transform object: %v", err), http.StatusInternalServerError)
 			return
 		}
-		serializeAndWite(l, w, obj)
+		serializeAndWrite(l, w, obj)
 		return
 	}
 	w.WriteHeader(404)
@@ -357,7 +357,7 @@ func transformIfNeeded(object interface{}, transform transform.TransformFunc) (i
 	return transform(serialized)
 }
 
-func serializeAndWite(l *zap.Logger, w http.ResponseWriter, data interface{}) {
+func serializeAndWrite(l *zap.Logger, w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	serialized, err := json.Marshal(data)
 	if err != nil {
@@ -395,7 +395,7 @@ func handleSSAR(l *zap.Logger, w http.ResponseWriter, r *http.Request) {
 func serveNamespace(l *zap.Logger, w http.ResponseWriter, namespaceList *corev1.NamespaceList, name string) {
 	for _, item := range namespaceList.Items {
 		if item.Name == name {
-			serializeAndWite(l, w, item)
+			serializeAndWrite(l, w, item)
 			return
 		}
 	}
@@ -470,7 +470,7 @@ func namespacedResourceForAllNamespaces(
 		return
 	}
 
-	serializeAndWite(l, w, transformed)
+	serializeAndWrite(l, w, transformed)
 }
 
 func loggingMiddleware(l *zap.Logger) mux.MiddlewareFunc {
