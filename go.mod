@@ -3,6 +3,7 @@ module github.com/alvaroaleman/static-kas
 go 1.17
 
 require (
+	github.com/felixge/httpsnoop v1.0.2
 	github.com/gorilla/mux v1.8.0
 	go.uber.org/zap v1.21.0
 	k8s.io/api v0.23.4

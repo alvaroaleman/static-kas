@@ -15,7 +15,9 @@ import (
 
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
+	"github.com/felixge/httpsnoop"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,7 +38,9 @@ func main() {
 	flag.StringVar(&o.baseDir, "base-dir", "", "The basedir of the cluster dump")
 	flag.Parse()
 
-	l, err := zap.NewProduction()
+	lCfg := zap.NewProductionConfig()
+	lCfg.EncoderConfig.EncodeTime = zapcore.RFC3339TimeEncoder
+	l, err := lCfg.Build()
 	if err != nil {
 		fmt.Printf("failed to construct logger: %v\n", err)
 		os.Exit(1)
@@ -81,10 +85,9 @@ func main() {
 	tableTransformMap := transform.NewTableTransformMap()
 
 	router := mux.NewRouter()
-	router.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		l.With(zap.String("path", r.URL.Path)).Info("Got request for unhandled path")
-		w.WriteHeader(404)
-	})
+	router.Use(loggingMiddleware(l))
+	// Re-Define the not found handler so it goes through the middleware
+	router.NotFoundHandler = router.NewRoute().BuildOnly().HandlerFunc(http.NotFound).GetHandler()
 	router.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte(`{}`))
 	})
@@ -468,4 +471,18 @@ func namespacedResourceForAllNamespaces(
 	}
 
 	serializeAndWite(l, w, transformed)
+}
+
+func loggingMiddleware(l *zap.Logger) mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			m := httpsnoop.CaptureMetrics(next, w, r)
+			l.Info("Processed request",
+				zap.String("method", r.Method),
+				zap.String("url", r.URL.String()),
+				zap.Int("status", m.Code),
+				zap.String("duration", m.Duration.String()),
+			)
+		})
+	}
 }
