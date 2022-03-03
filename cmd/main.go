@@ -387,6 +387,7 @@ func handleSSAR(l *zap.Logger, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ssar.Status.Allowed = true
+	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(ssar); err != nil {
 		l.Error("failed to encode response", zap.Error(err))
 	}
