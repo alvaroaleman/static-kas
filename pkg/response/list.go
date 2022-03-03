@@ -51,7 +51,9 @@ func (l *listResponse) run() error {
 	for _, filter := range l.filter {
 		list, err = filter(list)
 		if err != nil {
-			return fmt.Errorf("filter failed: %w", err)
+			err = fmt.Errorf("filter failed: %w", err)
+			http.Error(l.w, err.Error(), http.StatusInternalServerError)
+			return err
 		}
 	}
 
@@ -65,11 +67,44 @@ func (l *listResponse) run() error {
 	return writeJSON(transformed, l.w)
 }
 
-func (l *listResponse) read() ([][]byte, error) {
-	data, err := ioutil.ReadFile(filepath.Join(l.parentDir, l.resourceName+".yaml"))
+func (l *listResponse) readAndDeserialize() (*unstructured.UnstructuredList, error) {
+	return readAndDeserializeList(l.parentDir, l.resourceName)
+}
+
+func readAndDeserializeList(parenDir, resourceName string) (*unstructured.UnstructuredList, error) {
+	fileContents, err := readList(parenDir, resourceName)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &unstructured.UnstructuredList{}
+	result.SetAPIVersion("v1")
+	result.SetKind("List")
+
+	switch len(fileContents) {
+	case 0:
+		return result, nil
+	case 1:
+		return result, yaml.Unmarshal(fileContents[0], result)
+	default:
+		for _, fileContent := range fileContents {
+			target := &unstructured.Unstructured{}
+			if err := yaml.Unmarshal(fileContent, target); err != nil {
+				return nil, err
+			}
+			result.Items = append(result.Items, *target)
+		}
+
+		return result, nil
+	}
+
+}
+
+func readList(parentDir, resourceName string) ([][]byte, error) {
+	data, err := ioutil.ReadFile(filepath.Join(parentDir, resourceName+".yaml"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return l.readIndividualObjects()
+			return readIndividualObjects(parentDir, resourceName)
 		}
 		return nil, err
 	}
@@ -77,8 +112,8 @@ func (l *listResponse) read() ([][]byte, error) {
 	return [][]byte{data}, nil
 }
 
-func (l *listResponse) readIndividualObjects() ([][]byte, error) {
-	dirPath := filepath.Join(l.parentDir, l.resourceName)
+func readIndividualObjects(parentDir, resourceName string) ([][]byte, error) {
+	dirPath := filepath.Join(parentDir, resourceName)
 	entries, err := ioutil.ReadDir(dirPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -109,32 +144,4 @@ func (l *listResponse) readIndividualObjects() ([][]byte, error) {
 	wg.Wait()
 
 	return result, utilerrors.NewAggregate(errs)
-}
-
-func (l *listResponse) readAndDeserialize() (*unstructured.UnstructuredList, error) {
-	fileContents, err := l.read()
-	if err != nil {
-		return nil, err
-	}
-
-	result := &unstructured.UnstructuredList{}
-	result.SetAPIVersion("v1")
-	result.SetKind("List")
-
-	switch len(fileContents) {
-	case 0:
-		return result, nil
-	case 1:
-		return result, yaml.Unmarshal(fileContents[0], result)
-	default:
-		for _, fileContent := range fileContents {
-			target := &unstructured.Unstructured{}
-			if err := yaml.Unmarshal(fileContent, target); err != nil {
-				return nil, err
-			}
-			result.Items = append(result.Items, *target)
-		}
-
-		return result, nil
-	}
 }
