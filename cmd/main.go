@@ -123,14 +123,19 @@ func main() {
 		vars := mux.Vars(r)
 		containerName := r.URL.Query().Get("container")
 		fileName := "current.log"
+		hypershiftSuffix := ".log"
 		if r.URL.Query().Get("previous") == "true" {
 			fileName = "previous.log"
+			hypershiftSuffix = "-previous.log"
 		}
-		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "pods", vars["name"], containerName, containerName, "logs", fileName)
-		f, err := os.Open(path)
+		paths := []string{
+			path.Join(o.baseDir, "namespaces", vars["namespace"], "pods", vars["name"], containerName, containerName, "logs", fileName),
+			path.Join(o.baseDir, "namespaces", vars["namespace"], "core", "pods", "logs", vars["name"]+"-"+containerName+hypershiftSuffix),
+		}
+		f, err := openFirstFound(paths)
 		if err != nil {
 			w.WriteHeader(404)
-			w.Write([]byte(fmt.Sprintf("failed to open %s: %v", path, err)))
+			w.Write([]byte(fmt.Sprintf("failed to open one of %v: %v", paths, err)))
 			return
 		}
 		defer f.Close()
@@ -304,4 +309,19 @@ func loggingMiddleware(l *zap.Logger) mux.MiddlewareFunc {
 			)
 		})
 	}
+}
+
+func openFirstFound(paths []string) (*os.File, error) {
+	for _, path := range paths {
+		f, err := os.Open(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		return f, nil
+	}
+
+	return nil, os.ErrNotExist
 }
