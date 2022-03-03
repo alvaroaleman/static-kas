@@ -119,8 +119,10 @@ func main() {
 		if acceptsTable(r) {
 			transformFunc = tableTransformMap[transform.TransformEntryKey{ResourceName: vars["resource"], Verb: transform.VerbGet}]
 		}
-		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core", vars["resource"]+".yaml")
-		serveNamedObjectFromPath(path, l, w, vars["name"], transformFunc)
+		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core")
+		if err := response.NewGetResponse(w, path, vars["resource"], vars["name"], transformFunc); err != nil {
+			l.Error("failed to respond", zap.Error(err))
+		}
 	}).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/namespaces/{namespace}/pods/{name}/log", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -169,8 +171,14 @@ func main() {
 			serveNamespace(l, w, &allNamespaces, vars["name"])
 			return
 		}
-		path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
-		serveNamedObjectFromPath(path, l, w, vars["name"], nil)
+		var transformFunc func([]byte) (interface{}, error)
+		if acceptsTable(r) {
+			transformFunc = tableTransformMap[transform.TransformEntryKey{ResourceName: vars["resource"], Verb: transform.VerbList}]
+		}
+		path := path.Join(o.baseDir, "cluster-scoped-resources", "core")
+		if err := response.NewGetResponse(w, path, vars["resource"], vars["name"], transformFunc); err != nil {
+			l.Error("failed to respond", zap.Error(err))
+		}
 	}).Methods(http.MethodGet)
 	router.HandleFunc("/apis", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(serializedGroupList)
@@ -200,8 +208,10 @@ func main() {
 		if acceptsTable(r) {
 			transformFunc = tableTransformMap[transform.TransformEntryKey{GroupName: vars["group"], ResourceName: vars["resource"], Verb: transform.VerbGet}]
 		}
-		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
-		serveNamedObjectFromPath(path, l, w, vars["name"], transformFunc)
+		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"])
+		if err := response.NewGetResponse(w, path, vars["resource"], vars["name"], transformFunc); err != nil {
+			l.Error("failed to respond", zap.Error(err))
+		}
 	}).Methods(http.MethodGet)
 	router.HandleFunc("/apis/authorization.k8s.io/{version}/selfsubjectaccessreviews", func(w http.ResponseWriter, r *http.Request) {
 		handleSSAR(l.With(zap.String("path", r.URL.Path)), w, r)
@@ -231,46 +241,19 @@ func main() {
 	router.HandleFunc("/apis/{group}/{version}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
-		path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"], vars["resource"]+".yaml")
-		serveNamedObjectFromPath(path, l, w, vars["name"], nil)
+		path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"])
+		var transformFunc func([]byte) (interface{}, error)
+		if acceptsTable(r) {
+			transformFunc = tableTransformMap[transform.TransformEntryKey{GroupName: vars["group"], ResourceName: vars["resource"], Verb: transform.VerbList}]
+		}
+		if err := response.NewGetResponse(w, path, vars["resource"], vars["name"], transformFunc); err != nil {
+			l.Error("failed to respond", zap.Error(err))
+		}
 	}).Methods(http.MethodGet)
 
 	if err := http.ListenAndServe(":8080", router); err != nil {
 		l.Error("server ended", zap.Error(err))
 	}
-}
-
-func serveNamedObjectFromPath(path string, l *zap.Logger, w http.ResponseWriter, name string, transform transform.TransformFunc) {
-	raw, err := ioutil.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			l.Info("file not found", zap.String("path", path))
-			w.WriteHeader(404)
-			serializeAndWrite(l, w, unstructured.UnstructuredList{})
-			return
-		}
-		http.Error(w, fmt.Sprintf("failed to read %s: %v", path, err), http.StatusInternalServerError)
-		return
-	}
-
-	result := unstructured.UnstructuredList{}
-	if err := yaml.Unmarshal(raw, &result); err != nil {
-		http.Error(w, fmt.Sprintf("failed to deserialize contents of %s: %v", path, err), http.StatusInternalServerError)
-		return
-	}
-	for _, item := range result.Items {
-		if item.GetName() != name {
-			continue
-		}
-		obj, err := transformIfNeeded(item.Object, transform)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to transform object: %v", err), http.StatusInternalServerError)
-			return
-		}
-		serializeAndWrite(l, w, obj)
-		return
-	}
-	w.WriteHeader(404)
 }
 
 func transformIfNeeded(object interface{}, transform transform.TransformFunc) (interface{}, error) {

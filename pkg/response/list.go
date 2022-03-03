@@ -41,9 +41,9 @@ type listResponse struct {
 }
 
 func (l *listResponse) run() error {
-	list, err := l.readAndFilter()
+	list, err := l.readAndDeserialize()
 	if err != nil {
-		err = fmt.Errorf("failed to read and filter: %w", err)
+		err = fmt.Errorf("failed to read and deserialize: %w", err)
 		http.Error(l.w, err.Error(), http.StatusInternalServerError)
 		return err
 	}
@@ -66,7 +66,7 @@ func (l *listResponse) run() error {
 }
 
 func (l *listResponse) read() ([][]byte, error) {
-	data, err := ioutil.ReadFile(filepath.Join(l.parentDir, l.resourceName, ".yaml"))
+	data, err := ioutil.ReadFile(filepath.Join(l.parentDir, l.resourceName+".yaml"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return l.readIndividualObjects()
@@ -111,7 +111,7 @@ func (l *listResponse) readIndividualObjects() ([][]byte, error) {
 	return result, utilerrors.NewAggregate(errs)
 }
 
-func (l *listResponse) readAndFilter() (*unstructured.UnstructuredList, error) {
+func (l *listResponse) readAndDeserialize() (*unstructured.UnstructuredList, error) {
 	fileContents, err := l.read()
 	if err != nil {
 		return nil, err
