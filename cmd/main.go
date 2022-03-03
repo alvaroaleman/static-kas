@@ -103,12 +103,12 @@ func main() {
 	router.HandleFunc("/api/v1/namespaces/{namespace}/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
-		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core", vars["resource"]+".yaml")
+		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core")
 		var transformFunc func([]byte) (interface{}, error)
 		if acceptsTable(r) {
 			transformFunc = tableTransformMap[transform.TransformEntryKey{ResourceName: vars["resource"], Verb: transform.VerbList}]
 		}
-		if err := response.NewListResponse(w, path, transformFunc, filter.FromRequest(r)...); err != nil {
+		if err := response.NewListResponse(w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -156,8 +156,8 @@ func main() {
 			suffix := filepath.Join("core", vars["resource"]+".yaml")
 			namespacedResourceForAllNamespaces(basePath, &allNamespaces, suffix, l, w, transformFunc)
 		} else {
-			path := path.Join(o.baseDir, "cluster-scoped-resources", "core", vars["resource"]+".yaml")
-			if err := response.NewListResponse(w, path, transformFunc, filter.FromRequest(r)...); err != nil {
+			path := path.Join(o.baseDir, "cluster-scoped-resources", "core")
+			if err := response.NewListResponse(w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
 				l.Error("failed to respond", zap.Error(err))
 			}
 		}
@@ -188,8 +188,8 @@ func main() {
 		if acceptsTable(r) {
 			transformFunc = tableTransformMap[transform.TransformEntryKey{GroupName: vars["group"], ResourceName: vars["resource"], Verb: transform.VerbList}]
 		}
-		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"], vars["resource"]+".yaml")
-		if err := response.NewListResponse(w, path, transformFunc, filter.FromRequest(r)...); err != nil {
+		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"])
+		if err := response.NewListResponse(w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -222,8 +222,8 @@ func main() {
 			suffix := filepath.Join(vars["group"], vars["resource"]+".yaml")
 			namespacedResourceForAllNamespaces(basePath, &allNamespaces, suffix, l, w, transformFunc)
 		} else {
-			path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"], vars["resource"]+".yaml")
-			if err := response.NewListResponse(w, path, transformFunc, filter.FromRequest(r)...); err != nil {
+			path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"])
+			if err := response.NewListResponse(w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
 				l.Error("failed to respond", zap.Error(err))
 			}
 		}
