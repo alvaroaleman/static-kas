@@ -21,7 +21,7 @@ func filterForFieldSelector(value []string) Filter {
 		}
 		var sanitizedValues []string
 		for _, item := range value {
-			sanitizedValues = append(strings.Split(item, ","))
+			sanitizedValues = append(sanitizedValues, strings.Split(item, ",")...)
 		}
 		for _, entry := range sanitizedValues {
 			split := strings.Split(entry, "=")

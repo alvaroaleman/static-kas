@@ -215,7 +215,7 @@ func main() {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		if vars["group"] == "authorization.k8s.io" && vars["resource"] == "selfsubjectaccessreviews" {
-			http.Error(w, fmt.Sprintf("this endpoint only supports POST"), http.StatusMethodNotAllowed)
+			http.Error(w, "this endpoint only supports POST", http.StatusMethodNotAllowed)
 			return
 		}
 		var transformFunc func([]byte) (interface{}, error)
@@ -249,17 +249,6 @@ func main() {
 	if err := http.ListenAndServe(":8080", router); err != nil {
 		l.Error("server ended", zap.Error(err))
 	}
-}
-
-func transformIfNeeded(object interface{}, transform transform.TransformFunc) (interface{}, error) {
-	if transform == nil {
-		return object, nil
-	}
-	serialized, err := json.Marshal(object)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize to json before transforming: %v", err)
-	}
-	return transform(serialized)
 }
 
 func serializeAndWrite(l *zap.Logger, w http.ResponseWriter, data interface{}) {
