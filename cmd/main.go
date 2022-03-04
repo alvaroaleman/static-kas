@@ -49,7 +49,7 @@ func main() {
 	}
 
 	l.Info("Discovering api resources")
-	groupResourceListMap, groupResourceMap, err := discover(o.baseDir)
+	groupResourceListMap, groupResourceMap, err := discover(l, o.baseDir)
 	if err != nil {
 		l.Fatal("failed to discover apis", zap.Error(err))
 	}

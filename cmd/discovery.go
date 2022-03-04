@@ -9,10 +9,14 @@ import (
 	"strings"
 	"sync"
 
+	"go.uber.org/zap"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"sigs.k8s.io/yaml"
+
+	"github.com/alvaroaleman/static-kas/pkg/response"
 )
 
 func apiGroupList(rl map[string]*metav1.APIResourceList) (*metav1.APIGroupList, error) {
@@ -58,7 +62,13 @@ func serializeAPIResourceList(rl map[string]*metav1.APIResourceList) (map[string
 	return result, nil
 }
 
-func discover(basePath string) (map[string]*metav1.APIResourceList, map[groupVersionResource]metav1.APIResource, error) {
+func discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceList, map[groupVersionResource]metav1.APIResource, error) {
+	// explicitly read crds first, so we can insert the shortnames we find there into discovery
+	crdMap, err := getCRDs(basePath)
+	if err != nil {
+		// This shouldn't make us fail
+		l.Warn("encountered errors reading crds", zap.Error(err))
+	}
 	errs := errorGroup{}
 	result := map[string]*metav1.APIResourceList{}
 	apiResources := map[groupVersionResource]metav1.APIResource{}
@@ -156,7 +166,7 @@ func discover(basePath string) (map[string]*metav1.APIResourceList, map[groupVer
 				Namespaced: namespaced,
 				Kind:       kind,
 				Verbs:      []string{"get", "list"},
-				ShortNames: shortNameMapping[name],
+				ShortNames: shortNamesFor(name, groupVersion, crdMap),
 			}
 			result[groupVersion].APIResources = append(result[groupVersion].APIResources, resource)
 			apiResources[groupVersionResource{groupVersion: groupVersion, resource: name}] = resource
@@ -183,4 +193,51 @@ func (e *errorGroup) add(err error) {
 type groupVersionResource struct {
 	groupVersion string
 	resource     string
+}
+
+func getCRDs(basePath string) (map[string]*apiextensionsv1.CustomResourceDefinition, error) {
+	raw, err := response.ReadAndDeserializeList(filepath.Join(basePath, "cluster-scoped-resources", "apiextensions.k8s.io"), "customresourcedefinitions")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read crds: %w", err)
+	}
+
+	var errs []error
+	result := make(map[string]*apiextensionsv1.CustomResourceDefinition, len(raw.Items))
+	for _, item := range raw.Items {
+		serialized, err := json.Marshal(&item)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to serialize crd %s from unstructured: %w", item.GetName(), err))
+			continue
+		}
+		crd := &apiextensionsv1.CustomResourceDefinition{}
+		if err := json.Unmarshal(serialized, crd); err != nil {
+			errs = append(errs, fmt.Errorf("failed to deserialize crd %s into a %T: %w", item.GetName(), crd, err))
+			continue
+		}
+		result[crd.Name] = crd
+	}
+
+	return result, utilerrors.NewAggregate(errs)
+}
+
+func shortNamesFor(resource string, groupVersion string, crds map[string]*apiextensionsv1.CustomResourceDefinition) []string {
+	var group string
+	if split := strings.Split(groupVersion, "/"); len(split) == 2 {
+		group = split[0]
+	}
+	resourceGroup := resource
+	if group != "" {
+		resourceGroup += "." + group
+	}
+
+	// TODO: We should try to import this from k/k
+	if staticMappingVal, found := shortNameMapping[resourceGroup]; found {
+		return staticMappingVal
+	}
+
+	if crd, found := crds[resourceGroup]; found {
+		return crd.Spec.Names.ShortNames
+	}
+
+	return nil
 }

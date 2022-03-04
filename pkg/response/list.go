@@ -68,10 +68,10 @@ func (l *listResponse) run() error {
 }
 
 func (l *listResponse) readAndDeserialize() (*unstructured.UnstructuredList, error) {
-	return readAndDeserializeList(l.parentDir, l.resourceName)
+	return ReadAndDeserializeList(l.parentDir, l.resourceName)
 }
 
-func readAndDeserializeList(parenDir, resourceName string) (*unstructured.UnstructuredList, error) {
+func ReadAndDeserializeList(parenDir, resourceName string) (*unstructured.UnstructuredList, error) {
 	fileContents, err := readList(parenDir, resourceName)
 	if err != nil {
 		return nil, err
