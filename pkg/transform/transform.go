@@ -2,6 +2,8 @@ package transform
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -10,6 +12,8 @@ import (
 	api "k8s.io/api/core/v1"
 	corev1 "k8s.io/api/core/v1"
 	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apiextensions-apiserver/pkg/registry/customresource/tableconvertor"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -21,6 +25,7 @@ import (
 type TransformEntryKey struct {
 	ResourceName string
 	GroupName    string
+	Version      string
 	Verb         string
 }
 
@@ -29,11 +34,15 @@ const (
 	VerbGet  = "get"
 )
 
-type TransformFunc func([]byte) (interface{}, error)
+type TransformFunc func(r runtime.Object) (*metav1.Table, error)
 
 func transform(header []metav1.TableColumnDefinition, body func([]byte) ([]metav1.TableRow, error)) TransformFunc {
-	return func(data []byte) (interface{}, error) {
-		rows, err := body(data)
+	return func(o runtime.Object) (*metav1.Table, error) {
+		serialized, err := json.Marshal(o)
+		if err != nil {
+			return nil, fmt.Errorf("failed to serialize: %w", err)
+		}
+		rows, err := body(serialized)
 		if err != nil {
 			return nil, err
 		}
@@ -49,7 +58,7 @@ func transform(header []metav1.TableColumnDefinition, body func([]byte) ([]metav
 	}
 }
 
-func NewTableTransformMap() map[TransformEntryKey]TransformFunc {
+func NewTableTransformMap(crds map[string]*apiextensionsv1.CustomResourceDefinition) func(TransformEntryKey) TransformFunc {
 	result := map[TransformEntryKey]TransformFunc{}
 
 	// Everything below here is copied from https://github.com/kubernetes/kubernetes/blob/ab13c85316015cf9f115e29923ba9740bd1564fd/pkg/printers/internalversion/printers.go#L89
@@ -78,8 +87,8 @@ func NewTableTransformMap() map[TransformEntryKey]TransformFunc {
 		{Name: "Images", Type: "string", Priority: 1, Description: "Images referenced by each container in the template."},
 		{Name: "Selector", Type: "string", Priority: 1, Description: extensionsv1beta1.DeploymentSpec{}.SwaggerDoc()["selector"]},
 	}
-	result[TransformEntryKey{GroupName: "apps", ResourceName: "deployments", Verb: VerbList}] = transform(deploymentColumnDefinitions, printDeploymentList)
-	result[TransformEntryKey{GroupName: "apps", ResourceName: "deployments", Verb: VerbGet}] = transform(deploymentColumnDefinitions, printDeploymentFromRaw)
+	result[TransformEntryKey{GroupName: "apps", ResourceName: "deployments", Version: "v1", Verb: VerbList}] = transform(deploymentColumnDefinitions, printDeploymentList)
+	result[TransformEntryKey{GroupName: "apps", ResourceName: "deployments", Version: "v1", Verb: VerbGet}] = transform(deploymentColumnDefinitions, printDeploymentFromRaw)
 
 	statefulSetColumnDefinitions := []metav1.TableColumnDefinition{
 		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
@@ -88,8 +97,8 @@ func NewTableTransformMap() map[TransformEntryKey]TransformFunc {
 		{Name: "Containers", Type: "string", Priority: 1, Description: "Names of each container in the template."},
 		{Name: "Images", Type: "string", Priority: 1, Description: "Images referenced by each container in the template."},
 	}
-	result[TransformEntryKey{GroupName: "apps", ResourceName: "statefulsets", Verb: VerbList}] = transform(statefulSetColumnDefinitions, printStatefulSetList)
-	result[TransformEntryKey{GroupName: "apps", ResourceName: "statefulsets", Verb: VerbGet}] = transform(statefulSetColumnDefinitions, printStatefulSetFromRaw)
+	result[TransformEntryKey{GroupName: "apps", ResourceName: "statefulsets", Version: "v1", Verb: VerbList}] = transform(statefulSetColumnDefinitions, printStatefulSetList)
+	result[TransformEntryKey{GroupName: "apps", ResourceName: "statefulsets", Version: "v1", Verb: VerbGet}] = transform(statefulSetColumnDefinitions, printStatefulSetFromRaw)
 
 	daemonSetColumnDefinitions := []metav1.TableColumnDefinition{
 		{Name: "Name", Type: "string", Format: "name", Description: metav1.ObjectMeta{}.SwaggerDoc()["name"]},
@@ -104,10 +113,45 @@ func NewTableTransformMap() map[TransformEntryKey]TransformFunc {
 		{Name: "Images", Type: "string", Priority: 1, Description: "Images referenced by each container in the template."},
 		{Name: "Selector", Type: "string", Priority: 1, Description: extensionsv1beta1.DaemonSetSpec{}.SwaggerDoc()["selector"]},
 	}
-	result[TransformEntryKey{GroupName: "apps", ResourceName: "daemonsets", Verb: VerbList}] = transform(daemonSetColumnDefinitions, printDaemonSetListFromRaw)
-	result[TransformEntryKey{GroupName: "apps", ResourceName: "daemonsets", Verb: VerbGet}] = transform(daemonSetColumnDefinitions, printDaemonSetFromRaw)
+	result[TransformEntryKey{GroupName: "apps", ResourceName: "daemonsets", Version: "v1", Verb: VerbList}] = transform(daemonSetColumnDefinitions, printDaemonSetListFromRaw)
+	result[TransformEntryKey{GroupName: "apps", ResourceName: "daemonsets", Version: "v1", Verb: VerbGet}] = transform(daemonSetColumnDefinitions, printDaemonSetFromRaw)
 
-	return result
+	return func(key TransformEntryKey) TransformFunc {
+		if fn, found := result[key]; found {
+			return fn
+		}
+
+		crd, found := crds[key.ResourceName+"."+key.GroupName]
+		if !found {
+			return nil
+		}
+		for _, version := range crd.Spec.Versions {
+			if version.Name != key.Version {
+				continue
+			}
+			if len(version.AdditionalPrinterColumns) == 0 {
+				return nil
+			}
+
+			return func(r runtime.Object) (*metav1.Table, error) {
+				// TODO: Should we cache these?
+				converter, err := tableconvertor.New(version.AdditionalPrinterColumns)
+				if err != nil {
+					return nil, fmt.Errorf("failed to construct tableconvertor: %w", err)
+				}
+
+				table, err := converter.ConvertToTable(context.Background(), r, &metav1.TableOptions{})
+				if err != nil {
+					return nil, err
+				}
+				table.Kind = "Table"
+				table.APIVersion = "meta.k8s.io/v1"
+				return table, nil
+			}
+		}
+
+		return nil
+	}
 }
 
 func printPodList(podListRaw []byte) ([]metav1.TableRow, error) {

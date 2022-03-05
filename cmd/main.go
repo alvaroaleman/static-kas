@@ -52,7 +52,7 @@ func main() {
 	}
 
 	l.Info("Discovering api resources")
-	groupResourceListMap, groupResourceMap, err := discover(l, o.baseDir)
+	groupResourceListMap, groupResourceMap, crdMap, err := discover(l, o.baseDir)
 	if err != nil {
 		l.Fatal("failed to discover apis", zap.Error(err))
 	}
@@ -82,7 +82,7 @@ func main() {
 	}
 	l.Info("Finished discovering api resources")
 
-	tableTransformMap := transform.NewTableTransformMap()
+	tableTransform := transform.NewTableTransformMap(crdMap)
 
 	router := mux.NewRouter()
 	router.Use(loggingMiddleware(l))
@@ -100,9 +100,9 @@ func main() {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core")
-		var transformFunc func([]byte) (interface{}, error)
+		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransformMap[transform.TransformEntryKey{ResourceName: vars["resource"], Verb: transform.VerbList}]
+			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
 		}
 		if err := response.NewListResponse(w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
 			l.Error("failed to respond", zap.Error(err))
@@ -111,9 +111,9 @@ func main() {
 	router.HandleFunc("/api/v1/namespaces/{namespace}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
-		var transformFunc func([]byte) (interface{}, error)
+		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransformMap[transform.TransformEntryKey{ResourceName: vars["resource"], Verb: transform.VerbGet}]
+			transformFunc = tableTransform(transformKey(vars, transform.VerbGet))
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core")
 		if err := response.NewGetResponse(w, path, vars["resource"], vars["name"], transformFunc); err != nil {
@@ -174,9 +174,9 @@ func main() {
 			serializeAndWrite(l, w, allNamespaces)
 			return
 		}
-		var transformFunc func([]byte) (interface{}, error)
+		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransformMap[transform.TransformEntryKey{ResourceName: vars["resource"], Verb: transform.VerbList}]
+			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
 		}
 		if groupResourceMap[groupVersionResource{groupVersion: "v1", resource: vars["resource"]}].Namespaced {
 			if err := response.NewCrossNamespaceListResponse(w, filepath.Join(o.baseDir, "namespaces"), "core", vars["resource"], transformFunc); err != nil {
@@ -196,9 +196,9 @@ func main() {
 			serveNamespace(l, w, &allNamespaces, vars["name"])
 			return
 		}
-		var transformFunc func([]byte) (interface{}, error)
+		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransformMap[transform.TransformEntryKey{ResourceName: vars["resource"], Verb: transform.VerbList}]
+			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
 		}
 		path := path.Join(o.baseDir, "cluster-scoped-resources", "core")
 		if err := response.NewGetResponse(w, path, vars["resource"], vars["name"], transformFunc); err != nil {
@@ -217,9 +217,9 @@ func main() {
 	router.HandleFunc("/apis/{group}/{version}/namespaces/{namespace}/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
-		var transformFunc func([]byte) (interface{}, error)
+		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransformMap[transform.TransformEntryKey{GroupName: vars["group"], ResourceName: vars["resource"], Verb: transform.VerbList}]
+			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"])
 		if err := response.NewListResponse(w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
@@ -229,9 +229,9 @@ func main() {
 	router.HandleFunc("/apis/{group}/{version}/namespaces/{namespace}/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
-		var transformFunc func([]byte) (interface{}, error)
+		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransformMap[transform.TransformEntryKey{GroupName: vars["group"], ResourceName: vars["resource"], Verb: transform.VerbGet}]
+			transformFunc = tableTransform(transformKey(vars, transform.VerbGet))
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"])
 		if err := response.NewGetResponse(w, path, vars["resource"], vars["name"], transformFunc); err != nil {
@@ -248,9 +248,9 @@ func main() {
 			http.Error(w, "this endpoint only supports POST", http.StatusMethodNotAllowed)
 			return
 		}
-		var transformFunc func([]byte) (interface{}, error)
+		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransformMap[transform.TransformEntryKey{GroupName: vars["group"], ResourceName: vars["resource"], Verb: transform.VerbList}]
+			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
 		}
 		if groupResourceMap[groupVersionResource{groupVersion: vars["group"] + "/" + vars["version"], resource: vars["resource"]}].Namespaced {
 			if err := response.NewCrossNamespaceListResponse(w, filepath.Join(o.baseDir, "namespaces"), vars["group"], vars["resource"], transformFunc); err != nil {
@@ -267,9 +267,9 @@ func main() {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
 		path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"])
-		var transformFunc func([]byte) (interface{}, error)
+		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransformMap[transform.TransformEntryKey{GroupName: vars["group"], ResourceName: vars["resource"], Verb: transform.VerbList}]
+			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
 		}
 		if err := response.NewGetResponse(w, path, vars["resource"], vars["name"], transformFunc); err != nil {
 			l.Error("failed to respond", zap.Error(err))
@@ -366,4 +366,13 @@ func tailFile(file *os.File, numLines int) ([]byte, error) {
 	}
 
 	return bytes.Join(split[len(split)-1-numLines:], []byte("\n")), nil
+}
+
+func transformKey(vars map[string]string, verb string) transform.TransformEntryKey {
+	return transform.TransformEntryKey{
+		ResourceName: vars["resource"],
+		GroupName:    vars["group"],
+		Version:      vars["version"],
+		Verb:         verb,
+	}
 }

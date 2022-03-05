@@ -62,7 +62,7 @@ func serializeAPIResourceList(rl map[string]*metav1.APIResourceList) (map[string
 	return result, nil
 }
 
-func discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceList, map[groupVersionResource]metav1.APIResource, error) {
+func discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceList, map[groupVersionResource]metav1.APIResource, map[string]*apiextensionsv1.CustomResourceDefinition, error) {
 	// explicitly read crds first, so we can insert the shortnames we find there into discovery
 	crdMap, err := getCRDs(basePath)
 	if err != nil {
@@ -176,7 +176,7 @@ func discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceLis
 	})
 
 	wg.Wait()
-	return result, apiResources, utilerrors.NewAggregate(errs.errs)
+	return result, apiResources, crdMap, utilerrors.NewAggregate(errs.errs)
 }
 
 type errorGroup struct {

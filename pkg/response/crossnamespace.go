@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"path"
 
-	"github.com/alvaroaleman/static-kas/pkg/filter"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/alvaroaleman/static-kas/pkg/filter"
+	"github.com/alvaroaleman/static-kas/pkg/transform"
 )
 
 func NewCrossNamespaceListResponse(
@@ -15,7 +17,7 @@ func NewCrossNamespaceListResponse(
 	parentDir string,
 	group string,
 	resource string,
-	transform func([]byte) (interface{}, error),
+	transform transform.TransformFunc,
 	filter ...filter.Filter,
 ) error {
 	result, err := readAndDeserializeForAllNamespaces(parentDir, group, resource)
