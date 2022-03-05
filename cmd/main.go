@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -137,7 +140,31 @@ func main() {
 			return
 		}
 		defer f.Close()
-		io.Copy(w, f)
+
+		if tailRaw := r.URL.Query().Get("tailLines"); tailRaw != "" {
+			tailLines, err := strconv.Atoi(tailRaw)
+			if err != nil {
+				http.Error(w, "tailLines query arg must be an integer", http.StatusBadRequest)
+				return
+			}
+			lines, err := tailFile(f, tailLines)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("failed to read log: %v", err), http.StatusInternalServerError)
+				return
+			}
+			w.Write(lines)
+		} else {
+			io.Copy(w, f)
+		}
+
+		// Block so the client doesn't get an EOF error
+		if r.URL.Query().Get("follow") == "true" {
+			// We have to force a flush first, because golang buffers responses until the handler returns or the buffer is filled.
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			<-r.Context().Done()
+		}
 	}).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -326,4 +353,17 @@ func openFirstFound(paths []string) (*os.File, error) {
 	}
 
 	return nil, os.ErrNotExist
+}
+
+func tailFile(file *os.File, numLines int) ([]byte, error) {
+	data, err := ioutil.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read: %w", err)
+	}
+	split := bytes.Split(data, []byte("\n"))
+	if numLines > len(split) {
+		return data, nil
+	}
+
+	return bytes.Join(split[len(split)-1-numLines:], []byte("\n")), nil
 }
