@@ -9,6 +9,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/yaml"
+
+	"github.com/alvaroaleman/static-kas/pkg/transform"
 )
 
 func NewGetResponse(
@@ -16,7 +18,7 @@ func NewGetResponse(
 	parentDir string,
 	resourceName string,
 	objectName string,
-	transform func([]byte) (interface{}, error),
+	transform transform.TransformFunc,
 ) error {
 	return (&getResponse{
 		w:            w,
@@ -32,7 +34,7 @@ type getResponse struct {
 	parentDir    string
 	resourceName string
 	objectName   string
-	transform    func([]byte) (interface{}, error)
+	transform    transform.TransformFunc
 }
 
 func (g *getResponse) run() error {

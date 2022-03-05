@@ -14,13 +14,14 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/alvaroaleman/static-kas/pkg/filter"
+	"github.com/alvaroaleman/static-kas/pkg/transform"
 )
 
 func NewListResponse(
 	w http.ResponseWriter,
 	parentDir string,
 	resourceName string,
-	transform func([]byte) (interface{}, error),
+	transform transform.TransformFunc,
 	filter ...filter.Filter,
 ) error {
 	return (&listResponse{
@@ -37,7 +38,7 @@ type listResponse struct {
 	parentDir    string
 	resourceName string
 	filter       []filter.Filter
-	transform    func([]byte) (interface{}, error)
+	transform    transform.TransformFunc
 }
 
 func (l *listResponse) run() error {
