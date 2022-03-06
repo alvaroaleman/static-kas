@@ -132,6 +132,9 @@ func NewTableTransformMap(crds map[string]*apiextensionsv1.CustomResourceDefinit
 			if err != nil {
 				return nil, err
 			}
+			if err := makeTableObjectsPartialObjectMetadata(table); err != nil {
+				return nil, fmt.Errorf("failed to convert table objects to partialObjectMetadata: %w", err)
+			}
 			table.Kind = "Table"
 			table.APIVersion = "meta.k8s.io/v1"
 			return table, nil
@@ -504,6 +507,24 @@ func additionalPrinterColumsForCRD(key TransformEntryKey, crds map[string]*apiex
 			continue
 		}
 		return version.AdditionalPrinterColumns
+	}
+
+	return nil
+}
+
+func makeTableObjectsPartialObjectMetadata(t *metav1.Table) error {
+	for idx := range t.Rows {
+		serialized, err := json.Marshal(t.Rows[idx].Object)
+		if err != nil {
+			return err
+		}
+		m := &metav1.PartialObjectMetadata{}
+		if err := json.Unmarshal(serialized, m); err != nil {
+			return err
+		}
+		m.Kind = "PartialObjectMetadata"
+		m.APIVersion = "meta.k8s.io/v1beta1"
+		t.Rows[idx].Object = runtime.RawExtension{Object: m}
 	}
 
 	return nil
