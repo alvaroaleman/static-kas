@@ -18,6 +18,7 @@ import (
 )
 
 func NewListResponse(
+	r *http.Request,
 	w http.ResponseWriter,
 	parentDir string,
 	resourceName string,
@@ -25,6 +26,7 @@ func NewListResponse(
 	filter ...filter.Filter,
 ) error {
 	return (&listResponse{
+		r:            r,
 		w:            w,
 		parentDir:    parentDir,
 		resourceName: resourceName,
@@ -34,6 +36,7 @@ func NewListResponse(
 }
 
 type listResponse struct {
+	r            *http.Request
 	w            http.ResponseWriter
 	parentDir    string
 	resourceName string
@@ -56,6 +59,10 @@ func (l *listResponse) run() error {
 			http.Error(l.w, err.Error(), http.StatusInternalServerError)
 			return err
 		}
+	}
+
+	if isWatch(l.r) {
+		return respondToWatch(l.r, l.w, unstructuredListItemsToRuntimeObjects(list)...)
 	}
 
 	transformed, err := transformIfNeeded(list, l.transform)

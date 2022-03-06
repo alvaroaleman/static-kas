@@ -165,7 +165,7 @@ func discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceLis
 				Name:       name,
 				Namespaced: namespaced,
 				Kind:       kind,
-				Verbs:      []string{"get", "list"},
+				Verbs:      []string{"get", "list", "watch"},
 				ShortNames: shortNamesFor(name, groupVersion, crdMap),
 			}
 			result[groupVersion].APIResources = append(result[groupVersion].APIResources, resource)

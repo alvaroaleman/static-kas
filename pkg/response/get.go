@@ -14,6 +14,7 @@ import (
 )
 
 func NewGetResponse(
+	r *http.Request,
 	w http.ResponseWriter,
 	parentDir string,
 	resourceName string,
@@ -21,6 +22,7 @@ func NewGetResponse(
 	transform transform.TransformFunc,
 ) error {
 	return (&getResponse{
+		r:            r,
 		w:            w,
 		parentDir:    parentDir,
 		resourceName: resourceName,
@@ -30,6 +32,7 @@ func NewGetResponse(
 }
 
 type getResponse struct {
+	r            *http.Request
 	w            http.ResponseWriter
 	parentDir    string
 	resourceName string
@@ -47,6 +50,10 @@ func (g *getResponse) run() error {
 	if !found {
 		g.w.WriteHeader(404)
 		return nil
+	}
+
+	if isWatch(g.r) {
+		return respondToWatch(g.r, g.w, object)
 	}
 
 	transformed, err := transformIfNeeded(object, g.transform)

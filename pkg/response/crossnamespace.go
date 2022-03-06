@@ -13,6 +13,7 @@ import (
 )
 
 func NewCrossNamespaceListResponse(
+	r *http.Request,
 	w http.ResponseWriter,
 	parentDir string,
 	group string,
@@ -34,6 +35,10 @@ func NewCrossNamespaceListResponse(
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return err
 		}
+	}
+
+	if isWatch(r) {
+		return respondToWatch(r, w, unstructuredListItemsToRuntimeObjects(result)...)
 	}
 
 	transformed, err := transformIfNeeded(result, transform)

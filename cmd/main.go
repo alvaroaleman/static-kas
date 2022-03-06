@@ -104,7 +104,7 @@ func main() {
 		if acceptsTable(r) {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
 		}
-		if err := response.NewListResponse(w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
+		if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -116,7 +116,7 @@ func main() {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbGet))
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core")
-		if err := response.NewGetResponse(w, path, vars["resource"], vars["name"], transformFunc); err != nil {
+		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], transformFunc); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -179,12 +179,12 @@ func main() {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
 		}
 		if groupResourceMap[groupVersionResource{groupVersion: "v1", resource: vars["resource"]}].Namespaced {
-			if err := response.NewCrossNamespaceListResponse(w, filepath.Join(o.baseDir, "namespaces"), "core", vars["resource"], transformFunc); err != nil {
+			if err := response.NewCrossNamespaceListResponse(r, w, filepath.Join(o.baseDir, "namespaces"), "core", vars["resource"], transformFunc); err != nil {
 				l.Error("failed to respond", zap.Error(err))
 			}
 		} else {
 			path := path.Join(o.baseDir, "cluster-scoped-resources", "core")
-			if err := response.NewListResponse(w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
+			if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
 				l.Error("failed to respond", zap.Error(err))
 			}
 		}
@@ -201,7 +201,7 @@ func main() {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
 		}
 		path := path.Join(o.baseDir, "cluster-scoped-resources", "core")
-		if err := response.NewGetResponse(w, path, vars["resource"], vars["name"], transformFunc); err != nil {
+		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], transformFunc); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -222,7 +222,7 @@ func main() {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"])
-		if err := response.NewListResponse(w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
+		if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -234,7 +234,7 @@ func main() {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbGet))
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"])
-		if err := response.NewGetResponse(w, path, vars["resource"], vars["name"], transformFunc); err != nil {
+		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], transformFunc); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -253,12 +253,12 @@ func main() {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
 		}
 		if groupResourceMap[groupVersionResource{groupVersion: vars["group"] + "/" + vars["version"], resource: vars["resource"]}].Namespaced {
-			if err := response.NewCrossNamespaceListResponse(w, filepath.Join(o.baseDir, "namespaces"), vars["group"], vars["resource"], transformFunc); err != nil {
+			if err := response.NewCrossNamespaceListResponse(r, w, filepath.Join(o.baseDir, "namespaces"), vars["group"], vars["resource"], transformFunc); err != nil {
 				l.Error("failed to respond", zap.Error(err))
 			}
 		} else {
 			path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"])
-			if err := response.NewListResponse(w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
+			if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
 				l.Error("failed to respond", zap.Error(err))
 			}
 		}
@@ -271,7 +271,7 @@ func main() {
 		if acceptsTable(r) {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
 		}
-		if err := response.NewGetResponse(w, path, vars["resource"], vars["name"], transformFunc); err != nil {
+		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], transformFunc); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
