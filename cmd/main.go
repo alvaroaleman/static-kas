@@ -20,8 +20,8 @@ import (
 
 	"github.com/felixge/httpsnoop"
 	authorizationv1 "k8s.io/api/authorization/v1"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/alvaroaleman/static-kas/pkg/filter"
 	"github.com/alvaroaleman/static-kas/pkg/response"
@@ -68,17 +68,20 @@ func main() {
 	if err != nil {
 		l.Fatal("failed to serialize api group list", zap.Error(err))
 	}
-	allNamespaces := corev1.NamespaceList{TypeMeta: metav1.TypeMeta{Kind: "List"}}
+	allNamespaces := &unstructured.UnstructuredList{}
+	allNamespaces.SetAPIVersion("v1")
+	allNamespaces.SetKind("List")
 	namespacePath := filepath.Join(o.baseDir, "namespaces")
 	namespacesDirEntries, err := os.ReadDir(namespacePath)
 	if err != nil {
 		l.Fatal("failed to read namespaces folder", zap.String("path", namespacePath), zap.Error(err))
 	}
 	for _, entry := range namespacesDirEntries {
-		allNamespaces.Items = append(allNamespaces.Items, corev1.Namespace{
-			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
-			ObjectMeta: metav1.ObjectMeta{Name: entry.Name()},
-		})
+		ns := unstructured.Unstructured{}
+		ns.SetAPIVersion("v1")
+		ns.SetKind("Namespace")
+		ns.SetName(entry.Name())
+		allNamespaces.Items = append(allNamespaces.Items, ns)
 	}
 	l.Info("Finished discovering api resources")
 
@@ -104,7 +107,7 @@ func main() {
 		if acceptsTable(r) {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
 		}
-		if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
+		if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, nil, filter.FromRequest(r)...); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -116,7 +119,7 @@ func main() {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbGet), tableVersion(r))
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core")
-		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], transformFunc); err != nil {
+		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], nil, transformFunc); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -169,11 +172,6 @@ func main() {
 	router.HandleFunc("/api/v1/{resource}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
-		// Special snowflake, they are not being dumped by must-gather
-		if vars["resource"] == "namespaces" {
-			serializeAndWrite(l, w, allNamespaces)
-			return
-		}
 		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
@@ -182,26 +180,35 @@ func main() {
 			if err := response.NewCrossNamespaceListResponse(r, w, filepath.Join(o.baseDir, "namespaces"), "core", vars["resource"], transformFunc); err != nil {
 				l.Error("failed to respond", zap.Error(err))
 			}
-		} else {
-			path := path.Join(o.baseDir, "cluster-scoped-resources", "core")
-			if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
+			return
+		}
+		path := path.Join(o.baseDir, "cluster-scoped-resources", "core")
+		// Special snowflake, they are not being dumped by must-gather
+		if vars["resource"] == "namespaces" {
+			if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, allNamespaces, filter.FromRequest(r)...); err != nil {
 				l.Error("failed to respond", zap.Error(err))
 			}
+			return
+		}
+		if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, nil, filter.FromRequest(r)...); err != nil {
+			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
 	router.HandleFunc("/api/v1/{resource}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		l := l.With(zap.String("path", r.URL.Path))
-		if vars["resource"] == "namespaces" {
-			serveNamespace(l, w, &allNamespaces, vars["name"])
-			return
-		}
 		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
 		}
 		path := path.Join(o.baseDir, "cluster-scoped-resources", "core")
-		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], transformFunc); err != nil {
+		if vars["resource"] == "namespaces" {
+			if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], findByName(allNamespaces, vars["name"]), transformFunc); err != nil {
+				l.Error("failed to respond", zap.Error(err))
+			}
+			return
+		}
+		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], nil, transformFunc); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -222,7 +229,7 @@ func main() {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"])
-		if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
+		if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, nil, filter.FromRequest(r)...); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -234,7 +241,7 @@ func main() {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbGet), tableVersion(r))
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"])
-		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], transformFunc); err != nil {
+		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], nil, transformFunc); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -258,7 +265,7 @@ func main() {
 			}
 		} else {
 			path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"])
-			if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
+			if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, nil, filter.FromRequest(r)...); err != nil {
 				l.Error("failed to respond", zap.Error(err))
 			}
 		}
@@ -271,7 +278,7 @@ func main() {
 		if acceptsTable(r) {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
 		}
-		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], transformFunc); err != nil {
+		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], nil, transformFunc); err != nil {
 			l.Error("failed to respond", zap.Error(err))
 		}
 	}).Methods(http.MethodGet)
@@ -326,17 +333,6 @@ func handleSSAR(l *zap.Logger, w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func serveNamespace(l *zap.Logger, w http.ResponseWriter, namespaceList *corev1.NamespaceList, name string) {
-	for _, item := range namespaceList.Items {
-		if item.Name == name {
-			serializeAndWrite(l, w, item)
-			return
-		}
-	}
-
-	w.WriteHeader(404)
-}
-
 func loggingMiddleware(l *zap.Logger) mux.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -386,4 +382,14 @@ func transformKey(vars map[string]string, verb string) transform.TransformEntryK
 		Version:      vars["version"],
 		Verb:         verb,
 	}
+}
+
+func findByName(l *unstructured.UnstructuredList, name string) *unstructured.Unstructured {
+	for _, item := range l.Items {
+		if item.GetName() == name {
+			return item.DeepCopy()
+		}
+	}
+
+	return nil
 }

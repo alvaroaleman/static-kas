@@ -19,25 +19,28 @@ func NewGetResponse(
 	parentDir string,
 	resourceName string,
 	objectName string,
+	staticFallBack *unstructured.Unstructured,
 	transform transform.TransformFunc,
 ) error {
 	return (&getResponse{
-		r:            r,
-		w:            w,
-		parentDir:    parentDir,
-		resourceName: resourceName,
-		objectName:   objectName,
-		transform:    transform,
+		r:              r,
+		w:              w,
+		parentDir:      parentDir,
+		resourceName:   resourceName,
+		objectName:     objectName,
+		staticFallBack: staticFallBack,
+		transform:      transform,
 	}).run()
 }
 
 type getResponse struct {
-	r            *http.Request
-	w            http.ResponseWriter
-	parentDir    string
-	resourceName string
-	objectName   string
-	transform    transform.TransformFunc
+	r              *http.Request
+	w              http.ResponseWriter
+	parentDir      string
+	resourceName   string
+	objectName     string
+	staticFallBack *unstructured.Unstructured
+	transform      transform.TransformFunc
 }
 
 func (g *getResponse) run() error {
@@ -48,8 +51,11 @@ func (g *getResponse) run() error {
 		return err
 	}
 	if !found {
-		g.w.WriteHeader(404)
-		return nil
+		if g.staticFallBack == nil {
+			g.w.WriteHeader(404)
+			return nil
+		}
+		object = g.staticFallBack.DeepCopy()
 	}
 
 	if isWatch(g.r) {

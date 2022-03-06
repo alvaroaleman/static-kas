@@ -23,25 +23,28 @@ func NewListResponse(
 	parentDir string,
 	resourceName string,
 	transform transform.TransformFunc,
+	staticFallBack *unstructured.UnstructuredList,
 	filter ...filter.Filter,
 ) error {
 	return (&listResponse{
-		r:            r,
-		w:            w,
-		parentDir:    parentDir,
-		resourceName: resourceName,
-		transform:    transform,
-		filter:       filter,
+		r:              r,
+		w:              w,
+		staticFallBack: staticFallBack,
+		parentDir:      parentDir,
+		resourceName:   resourceName,
+		transform:      transform,
+		filter:         filter,
 	}).run()
 }
 
 type listResponse struct {
-	r            *http.Request
-	w            http.ResponseWriter
-	parentDir    string
-	resourceName string
-	filter       []filter.Filter
-	transform    transform.TransformFunc
+	r              *http.Request
+	w              http.ResponseWriter
+	staticFallBack *unstructured.UnstructuredList
+	parentDir      string
+	resourceName   string
+	filter         []filter.Filter
+	transform      transform.TransformFunc
 }
 
 func (l *listResponse) run() error {
@@ -50,6 +53,9 @@ func (l *listResponse) run() error {
 		err = fmt.Errorf("failed to read and deserialize: %w", err)
 		http.Error(l.w, err.Error(), http.StatusInternalServerError)
 		return err
+	}
+	if len(list.Items) == 0 && l.staticFallBack != nil {
+		list = l.staticFallBack.DeepCopy()
 	}
 
 	for _, filter := range l.filter {
