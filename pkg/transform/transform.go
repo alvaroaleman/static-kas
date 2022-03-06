@@ -121,36 +121,21 @@ func NewTableTransformMap(crds map[string]*apiextensionsv1.CustomResourceDefinit
 			return fn
 		}
 
-		crd, found := crds[key.ResourceName+"."+key.GroupName]
-		if !found {
-			return nil
+		return func(r runtime.Object) (*metav1.Table, error) {
+			// TODO: Should we cache these?
+			converter, err := tableconvertor.New(additionalPrinterColumsForCRD(key, crds))
+			if err != nil {
+				return nil, fmt.Errorf("failed to construct tableconvertor: %w", err)
+			}
+
+			table, err := converter.ConvertToTable(context.Background(), r, &metav1.TableOptions{})
+			if err != nil {
+				return nil, err
+			}
+			table.Kind = "Table"
+			table.APIVersion = "meta.k8s.io/v1"
+			return table, nil
 		}
-		for _, version := range crd.Spec.Versions {
-			if version.Name != key.Version {
-				continue
-			}
-			if len(version.AdditionalPrinterColumns) == 0 {
-				return nil
-			}
-
-			return func(r runtime.Object) (*metav1.Table, error) {
-				// TODO: Should we cache these?
-				converter, err := tableconvertor.New(version.AdditionalPrinterColumns)
-				if err != nil {
-					return nil, fmt.Errorf("failed to construct tableconvertor: %w", err)
-				}
-
-				table, err := converter.ConvertToTable(context.Background(), r, &metav1.TableOptions{})
-				if err != nil {
-					return nil, err
-				}
-				table.Kind = "Table"
-				table.APIVersion = "meta.k8s.io/v1"
-				return table, nil
-			}
-		}
-
-		return nil
 	}
 }
 
@@ -506,4 +491,20 @@ func printDaemonSetList(list *appsv1.DaemonSetList) ([]metav1.TableRow, error) {
 		rows = append(rows, r...)
 	}
 	return rows, nil
+}
+
+func additionalPrinterColumsForCRD(key TransformEntryKey, crds map[string]*apiextensionsv1.CustomResourceDefinition) []apiextensionsv1.CustomResourceColumnDefinition {
+
+	crd, found := crds[key.ResourceName+"."+key.GroupName]
+	if !found {
+		return nil
+	}
+	for _, version := range crd.Spec.Versions {
+		if version.Name != key.Version {
+			continue
+		}
+		return version.AdditionalPrinterColumns
+	}
+
+	return nil
 }
