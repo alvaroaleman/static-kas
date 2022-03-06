@@ -36,30 +36,32 @@ const (
 
 type TransformFunc func(r runtime.Object) (*metav1.Table, error)
 
-func transform(header []metav1.TableColumnDefinition, body func([]byte) ([]metav1.TableRow, error)) TransformFunc {
-	return func(o runtime.Object) (*metav1.Table, error) {
-		serialized, err := json.Marshal(o)
-		if err != nil {
-			return nil, fmt.Errorf("failed to serialize: %w", err)
-		}
-		rows, err := body(serialized)
-		if err != nil {
-			return nil, err
-		}
+func transform(header []metav1.TableColumnDefinition, body func([]byte) ([]metav1.TableRow, error)) func(string) TransformFunc {
+	return func(tableVersion string) TransformFunc {
+		return func(o runtime.Object) (*metav1.Table, error) {
+			serialized, err := json.Marshal(o)
+			if err != nil {
+				return nil, fmt.Errorf("failed to serialize: %w", err)
+			}
+			rows, err := body(serialized)
+			if err != nil {
+				return nil, err
+			}
 
-		return &metav1.Table{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       "Table",
-				APIVersion: "meta.k8s.io/v1",
-			},
-			ColumnDefinitions: header,
-			Rows:              rows,
-		}, nil
+			return &metav1.Table{
+				TypeMeta: metav1.TypeMeta{
+					Kind:       "Table",
+					APIVersion: "meta.k8s.io/" + tableVersion,
+				},
+				ColumnDefinitions: header,
+				Rows:              rows,
+			}, nil
+		}
 	}
 }
 
-func NewTableTransformMap(crds map[string]*apiextensionsv1.CustomResourceDefinition) func(TransformEntryKey) TransformFunc {
-	result := map[TransformEntryKey]TransformFunc{}
+func NewTableTransformMap(crds map[string]*apiextensionsv1.CustomResourceDefinition) func(TransformEntryKey, string) TransformFunc {
+	result := map[TransformEntryKey]func(string) TransformFunc{}
 
 	// Everything below here is copied from https://github.com/kubernetes/kubernetes/blob/ab13c85316015cf9f115e29923ba9740bd1564fd/pkg/printers/internalversion/printers.go#L89
 	// with some slight adjustments to work on the external api types
@@ -116,9 +118,9 @@ func NewTableTransformMap(crds map[string]*apiextensionsv1.CustomResourceDefinit
 	result[TransformEntryKey{GroupName: "apps", ResourceName: "daemonsets", Version: "v1", Verb: VerbList}] = transform(daemonSetColumnDefinitions, printDaemonSetListFromRaw)
 	result[TransformEntryKey{GroupName: "apps", ResourceName: "daemonsets", Version: "v1", Verb: VerbGet}] = transform(daemonSetColumnDefinitions, printDaemonSetFromRaw)
 
-	return func(key TransformEntryKey) TransformFunc {
+	return func(key TransformEntryKey, tableVersion string) TransformFunc {
 		if fn, found := result[key]; found {
-			return fn
+			return fn(tableVersion)
 		}
 
 		return func(r runtime.Object) (*metav1.Table, error) {
@@ -136,7 +138,9 @@ func NewTableTransformMap(crds map[string]*apiextensionsv1.CustomResourceDefinit
 				return nil, fmt.Errorf("failed to convert table objects to partialObjectMetadata: %w", err)
 			}
 			table.Kind = "Table"
-			table.APIVersion = "meta.k8s.io/v1"
+			// There is a v1 and a v1beta1 and they both look the same, but clients might be unable to decode
+			// if the version doesn't match what they requested.
+			table.APIVersion = "meta.k8s.io/" + tableVersion
 			return table, nil
 		}
 	}

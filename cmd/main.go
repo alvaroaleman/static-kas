@@ -102,7 +102,7 @@ func main() {
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core")
 		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
+			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
 		}
 		if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
 			l.Error("failed to respond", zap.Error(err))
@@ -113,7 +113,7 @@ func main() {
 		l := l.With(zap.String("path", r.URL.Path))
 		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransform(transformKey(vars, transform.VerbGet))
+			transformFunc = tableTransform(transformKey(vars, transform.VerbGet), tableVersion(r))
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], "core")
 		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], transformFunc); err != nil {
@@ -176,7 +176,7 @@ func main() {
 		}
 		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
+			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
 		}
 		if groupResourceMap[groupVersionResource{groupVersion: "v1", resource: vars["resource"]}].Namespaced {
 			if err := response.NewCrossNamespaceListResponse(r, w, filepath.Join(o.baseDir, "namespaces"), "core", vars["resource"], transformFunc); err != nil {
@@ -198,7 +198,7 @@ func main() {
 		}
 		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
+			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
 		}
 		path := path.Join(o.baseDir, "cluster-scoped-resources", "core")
 		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], transformFunc); err != nil {
@@ -219,7 +219,7 @@ func main() {
 		l := l.With(zap.String("path", r.URL.Path))
 		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
+			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"])
 		if err := response.NewListResponse(r, w, path, vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
@@ -231,7 +231,7 @@ func main() {
 		l := l.With(zap.String("path", r.URL.Path))
 		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransform(transformKey(vars, transform.VerbGet))
+			transformFunc = tableTransform(transformKey(vars, transform.VerbGet), tableVersion(r))
 		}
 		path := path.Join(o.baseDir, "namespaces", vars["namespace"], vars["group"])
 		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], transformFunc); err != nil {
@@ -250,7 +250,7 @@ func main() {
 		}
 		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
+			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
 		}
 		if groupResourceMap[groupVersionResource{groupVersion: vars["group"] + "/" + vars["version"], resource: vars["resource"]}].Namespaced {
 			if err := response.NewCrossNamespaceListResponse(r, w, filepath.Join(o.baseDir, "namespaces"), vars["group"], vars["resource"], transformFunc); err != nil {
@@ -269,7 +269,7 @@ func main() {
 		path := path.Join(o.baseDir, "cluster-scoped-resources", vars["group"])
 		var transformFunc transform.TransformFunc
 		if acceptsTable(r) {
-			transformFunc = tableTransform(transformKey(vars, transform.VerbList))
+			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
 		}
 		if err := response.NewGetResponse(r, w, path, vars["resource"], vars["name"], transformFunc); err != nil {
 			l.Error("failed to respond", zap.Error(err))
@@ -299,6 +299,17 @@ func serializeAndWrite(l *zap.Logger, w http.ResponseWriter, data interface{}) {
 
 func acceptsTable(r *http.Request) bool {
 	return len(r.Header["Accept"]) > 0 && strings.Contains(r.Header["Accept"][0], "as=Table")
+}
+
+func tableVersion(r *http.Request) string {
+	split := strings.Split(r.Header["Accept"][0], ";")
+	for _, s := range split {
+		if strings.HasPrefix(s, "v=v") {
+			return strings.Split(s, "=")[1]
+		}
+	}
+
+	return ""
 }
 
 func handleSSAR(l *zap.Logger, w http.ResponseWriter, r *http.Request) {
