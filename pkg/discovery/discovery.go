@@ -74,7 +74,16 @@ func Discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceLis
 				// If we find a list, the resouce name is simply the filename without the yaml suffix
 				name = strings.TrimSuffix(d.Name(), ".yaml")
 				kind, _, _ = unstructured.NestedString(items[0].(map[string]interface{}), "kind")
+
+				if kind == "" {
+					kind = strings.TrimSuffix(u.GetKind(), "List")
+				}
+
 				groupVersion, _, _ = unstructured.NestedString(items[0].(map[string]interface{}), "apiVersion")
+
+				if groupVersion == "" {
+					groupVersion = "v1"
+				}
 			} else {
 				pathElements := strings.Split(path, "/")
 				// Should never happen(tm)
