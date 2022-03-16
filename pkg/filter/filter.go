@@ -65,7 +65,7 @@ func filterForLabels(value []string) Filter {
 		for _, entry := range value {
 			selector, err := labels.Parse(entry)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse label selector: %s", entry)
+				return nil, fmt.Errorf("failed to parse label selector %s: %w", entry, err)
 			}
 			selectors = append(selectors, selector)
 		}
