@@ -177,7 +177,7 @@ func main() {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
 		}
 		if groupResourceMap[groupVersionResource{groupVersion: "v1", resource: vars["resource"]}].Namespaced {
-			if err := response.NewCrossNamespaceListResponse(r, w, filepath.Join(o.baseDir, "namespaces"), "core", vars["resource"], transformFunc); err != nil {
+			if err := response.NewCrossNamespaceListResponse(r, w, filepath.Join(o.baseDir, "namespaces"), "core", vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
 				l.Error("failed to respond", zap.Error(err))
 			}
 			return
