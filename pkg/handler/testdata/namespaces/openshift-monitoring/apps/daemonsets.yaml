@@ -1,0 +1,201 @@
+---
+apiVersion: apps/v1
+items:
+- apiVersion: apps/v1
+  kind: DaemonSet
+  metadata:
+    annotations:
+      deprecated.daemonset.template.generation: "1"
+    creationTimestamp: "2022-03-04T18:08:08Z"
+    generation: 1
+    labels:
+      app.kubernetes.io/component: exporter
+      app.kubernetes.io/managed-by: cluster-monitoring-operator
+      app.kubernetes.io/name: node-exporter
+      app.kubernetes.io/part-of: openshift-monitoring
+      app.kubernetes.io/version: 1.3.1
+    name: node-exporter
+    namespace: openshift-monitoring
+    resourceVersion: "8818"
+    uid: 36b471ff-321f-4719-bf5f-2b634accc147
+  spec:
+    revisionHistoryLimit: 10
+    selector:
+      matchLabels:
+        app.kubernetes.io/component: exporter
+        app.kubernetes.io/name: node-exporter
+        app.kubernetes.io/part-of: openshift-monitoring
+    template:
+      metadata:
+        annotations:
+          kubectl.kubernetes.io/default-container: node-exporter
+          target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
+        creationTimestamp: null
+        labels:
+          app.kubernetes.io/component: exporter
+          app.kubernetes.io/managed-by: cluster-monitoring-operator
+          app.kubernetes.io/name: node-exporter
+          app.kubernetes.io/part-of: openshift-monitoring
+          app.kubernetes.io/version: 1.3.1
+      spec:
+        containers:
+        - args:
+          - --web.listen-address=127.0.0.1:9100
+          - --path.sysfs=/host/sys
+          - --path.rootfs=/host/root
+          - --no-collector.wifi
+          - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/k3s/containerd/.+|var/lib/docker/.+|var/lib/kubelet/pods/.+)($|/)
+          - --collector.netclass.ignored-devices=^(veth.*|[a-f0-9]{15})$
+          - --collector.netdev.device-exclude=^(veth.*|[a-f0-9]{15})$
+          - --collector.cpu.info
+          - --collector.textfile.directory=/var/node_exporter/textfile
+          - --no-collector.cpufreq
+          image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:92f508bec80c17c3c3a185e407df81078e606be077b082f917aaa79623d1ffe0
+          imagePullPolicy: IfNotPresent
+          name: node-exporter
+          resources:
+            requests:
+              cpu: 8m
+              memory: 32Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: FallbackToLogsOnError
+          volumeMounts:
+          - mountPath: /host/sys
+            mountPropagation: HostToContainer
+            name: sys
+            readOnly: true
+          - mountPath: /host/root
+            mountPropagation: HostToContainer
+            name: root
+            readOnly: true
+          - mountPath: /var/node_exporter/textfile
+            name: node-exporter-textfile
+            readOnly: true
+          workingDir: /var/node_exporter/textfile
+        - args:
+          - --logtostderr
+          - --secure-listen-address=[$(IP)]:9100
+          - --tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+          - --upstream=http://127.0.0.1:9100/
+          - --tls-cert-file=/etc/tls/private/tls.crt
+          - --tls-private-key-file=/etc/tls/private/tls.key
+          - --client-ca-file=/etc/tls/client/client-ca.crt
+          - --config-file=/etc/kube-rbac-policy/config.yaml
+          - --tls-min-version=VersionTLS12
+          env:
+          - name: IP
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: status.podIP
+          image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:bde2a3cf16e475f514b6a0360a5d7de04a4e0a7f9792f1c3a264f4c347ce19ca
+          imagePullPolicy: IfNotPresent
+          name: kube-rbac-proxy
+          ports:
+          - containerPort: 9100
+            hostPort: 9100
+            name: https
+            protocol: TCP
+          resources:
+            requests:
+              cpu: 1m
+              memory: 15Mi
+          securityContext:
+            runAsGroup: 65532
+            runAsNonRoot: true
+            runAsUser: 65532
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: FallbackToLogsOnError
+          volumeMounts:
+          - mountPath: /etc/tls/private
+            name: node-exporter-tls
+          - mountPath: /etc/tls/client
+            name: metrics-client-ca
+          - mountPath: /etc/kube-rbac-policy
+            name: node-exporter-kube-rbac-proxy-config
+            readOnly: true
+        dnsPolicy: ClusterFirst
+        hostNetwork: true
+        hostPID: true
+        initContainers:
+        - command:
+          - /bin/sh
+          - -c
+          - '[[ ! -d /node_exporter/collectors/init ]] || find /node_exporter/collectors/init
+            -perm /111 -type f -exec {} \;'
+          env:
+          - name: TMPDIR
+            value: /tmp
+          image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:92f508bec80c17c3c3a185e407df81078e606be077b082f917aaa79623d1ffe0
+          imagePullPolicy: IfNotPresent
+          name: init-textfile
+          resources:
+            requests:
+              cpu: 1m
+              memory: 1Mi
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: FallbackToLogsOnError
+          volumeMounts:
+          - mountPath: /var/node_exporter/textfile
+            name: node-exporter-textfile
+          - mountPath: /var/log/wtmp
+            name: node-exporter-wtmp
+            readOnly: true
+          workingDir: /var/node_exporter/textfile
+        nodeSelector:
+          kubernetes.io/os: linux
+        priorityClassName: system-cluster-critical
+        restartPolicy: Always
+        schedulerName: default-scheduler
+        securityContext: {}
+        serviceAccount: node-exporter
+        serviceAccountName: node-exporter
+        terminationGracePeriodSeconds: 30
+        tolerations:
+        - operator: Exists
+        volumes:
+        - hostPath:
+            path: /sys
+            type: ""
+          name: sys
+        - hostPath:
+            path: /
+            type: ""
+          name: root
+        - emptyDir: {}
+          name: node-exporter-textfile
+        - name: node-exporter-tls
+          secret:
+            defaultMode: 420
+            secretName: node-exporter-tls
+        - hostPath:
+            path: /var/log/wtmp
+            type: File
+          name: node-exporter-wtmp
+        - configMap:
+            defaultMode: 420
+            name: metrics-client-ca
+          name: metrics-client-ca
+        - name: node-exporter-kube-rbac-proxy-config
+          secret:
+            defaultMode: 420
+            secretName: node-exporter-kube-rbac-proxy-config
+    updateStrategy:
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: 10%
+      type: RollingUpdate
+  status:
+    currentNumberScheduled: 3
+    desiredNumberScheduled: 3
+    numberAvailable: 3
+    numberMisscheduled: 0
+    numberReady: 3
+    observedGeneration: 1
+    updatedNumberScheduled: 3
+kind: DaemonSetList
+metadata:
+  resourceVersion: "188126"
