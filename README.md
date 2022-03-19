@@ -1,6 +1,7 @@
 # Static KAS
 
 A fake kube-apiserver that serves static data from an Openshift must-gather. Dynamically discovers resources and supports logs. Requires golang >= 1.17.
+While there is no explicit documentation for the directory layout, a sample is included for testing in [./pkg/handler/testdata](./pkg/handler/testdata).
 
 Usage:
 

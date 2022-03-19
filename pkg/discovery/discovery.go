@@ -1,4 +1,4 @@
-package main
+package discovery
 
 import (
 	"encoding/json"
@@ -19,50 +19,7 @@ import (
 	"github.com/alvaroaleman/static-kas/pkg/response"
 )
 
-func apiGroupList(rl map[string]*metav1.APIResourceList) (*metav1.APIGroupList, error) {
-	result := &metav1.APIGroupList{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "APIGroupList",
-			APIVersion: "v1",
-		},
-	}
-	for groupVersion := range rl {
-		if groupVersion == "v1" {
-			continue
-		}
-		split := strings.Split(groupVersion, "/")
-		if len(split) != 2 {
-			return nil, fmt.Errorf("groupVErsion %q does not yield exactly two result when slash splitting", groupVersion)
-		}
-
-		// TODO: This assumes there is never more than one version, is this safe?
-		group, version := split[0], split[1]
-		result.Groups = append(result.Groups, metav1.APIGroup{
-			Name: group,
-			Versions: []metav1.GroupVersionForDiscovery{{
-				GroupVersion: groupVersion,
-				Version:      version,
-			}},
-		})
-	}
-
-	return result, nil
-}
-
-func serializeAPIResourceList(rl map[string]*metav1.APIResourceList) (map[string][]byte, error) {
-	result := make(map[string][]byte, len(rl))
-	for k, v := range rl {
-		serialized, err := json.Marshal(v)
-		if err != nil {
-			return nil, fmt.Errorf("failed to serialize resorucelist for group %s: %w", k, err)
-		}
-		result[k] = serialized
-	}
-
-	return result, nil
-}
-
-func discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceList, map[groupVersionResource]metav1.APIResource, map[string]*apiextensionsv1.CustomResourceDefinition, error) {
+func Discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceList, map[GroupVersionResource]metav1.APIResource, map[string]*apiextensionsv1.CustomResourceDefinition, error) {
 	// explicitly read crds first, so we can insert the shortnames we find there into discovery
 	crdMap, err := getCRDs(basePath)
 	if err != nil {
@@ -71,7 +28,7 @@ func discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceLis
 	}
 	errs := errorGroup{}
 	result := map[string]*metav1.APIResourceList{}
-	apiResources := map[groupVersionResource]metav1.APIResource{}
+	apiResources := map[GroupVersionResource]metav1.APIResource{}
 	lock := sync.Mutex{}
 	wg := sync.WaitGroup{}
 
@@ -169,7 +126,7 @@ func discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceLis
 				ShortNames: shortNamesFor(name, groupVersion, crdMap),
 			}
 			result[groupVersion].APIResources = append(result[groupVersion].APIResources, resource)
-			apiResources[groupVersionResource{groupVersion: groupVersion, resource: name}] = resource
+			apiResources[GroupVersionResource{GroupVersion: groupVersion, Resource: name}] = resource
 		}()
 
 		return nil
@@ -190,9 +147,9 @@ func (e *errorGroup) add(err error) {
 	e.errs = append(e.errs, err)
 }
 
-type groupVersionResource struct {
-	groupVersion string
-	resource     string
+type GroupVersionResource struct {
+	GroupVersion string
+	Resource     string
 }
 
 func getCRDs(basePath string) (map[string]*apiextensionsv1.CustomResourceDefinition, error) {
