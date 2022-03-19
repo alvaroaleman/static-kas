@@ -2,14 +2,17 @@ package handler_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"go.uber.org/zap/zaptest"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
-
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/alvaroaleman/static-kas/pkg/handler"
@@ -151,6 +154,66 @@ func TestServer(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "List pods table printing",
+			run: func(t *testing.T) {
+				table, err := requestTableOnPath(ctx, "/api/v1/pods")
+				if err != nil {
+					t.Fatalf("failed to get table for pods: %v", err)
+				}
+				if n := len(table.ColumnDefinitions); n != 9 {
+					t.Errorf("expected nine columns, got %d", n)
+				}
+				if n := len(table.Rows); n != 2 {
+					t.Errorf("expected to get two pods back, got %d", n)
+				}
+			},
+		},
+		{
+			name: "Get pod table printing",
+			run: func(t *testing.T) {
+				table, err := requestTableOnPath(ctx, "/api/v1/namespaces/openshift-network-operator/pods/network-operator-7887564c4-mjg9d")
+				if err != nil {
+					t.Fatalf("failed to get table for replicaset: %v", err)
+				}
+				if n := len(table.ColumnDefinitions); n != 9 {
+					t.Errorf("expected nine columns, got %d", n)
+				}
+				if n := len(table.Rows); n != 1 {
+					t.Errorf("expected to get one replicaset back, got %d", n)
+				}
+			},
+		},
+		{
+			name: "List replicasets table printing",
+			run: func(t *testing.T) {
+				table, err := requestTableOnPath(ctx, "/apis/apps/v1/replicasets")
+				if err != nil {
+					t.Fatalf("failed to get table for replicaset: %v", err)
+				}
+				if n := len(table.ColumnDefinitions); n != 8 {
+					t.Errorf("expected eight columns, got %d", n)
+				}
+				if n := len(table.Rows); n != 2 {
+					t.Errorf("expected to get two replicasets back, got %d", n)
+				}
+			},
+		},
+		{
+			name: "Get replicaset table printing",
+			run: func(t *testing.T) {
+				table, err := requestTableOnPath(ctx, "/apis/apps/v1/namespaces/openshift-network-operator/replicasets/network-operator-7887564c4")
+				if err != nil {
+					t.Fatalf("failed to get table for replicaset: %v", err)
+				}
+				if n := len(table.ColumnDefinitions); n != 8 {
+					t.Errorf("expected eight columns, got %d", n)
+				}
+				if n := len(table.Rows); n != 1 {
+					t.Errorf("expected to get one replicaset back, got %d", n)
+				}
+			},
+		},
 	}
 
 	for _, tc := range tcs {
@@ -168,4 +231,28 @@ func unstructuredListFor(apiVersion, kind string) *unstructured.UnstructuredList
 	u.SetKind(kind)
 
 	return u
+}
+
+func requestTableOnPath(ctx context.Context, path string) (*metav1.Table, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1:8080"+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json;as=Table;v=v1;g=meta.k8s.io")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to do http request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("got a non-200 status code of %d back", resp.StatusCode)
+	}
+
+	table := &metav1.Table{}
+	if err := json.NewDecoder(resp.Body).Decode(table); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response into metav1.Table: %w", err)
+	}
+
+	return table, nil
 }

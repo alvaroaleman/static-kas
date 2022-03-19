@@ -1,0 +1,111 @@
+---
+apiVersion: apps/v1
+items:
+- apiVersion: apps/v1
+  kind: ReplicaSet
+  metadata:
+    annotations:
+      deployment.kubernetes.io/desired-replicas: "1"
+      deployment.kubernetes.io/max-replicas: "2"
+      deployment.kubernetes.io/revision: "1"
+      include.release.openshift.io/ibm-cloud-managed: "true"
+    creationTimestamp: "2022-03-04T18:04:53Z"
+    generation: 1
+    labels:
+      app: service-ca-operator
+      pod-template-hash: 7496fb6588
+    name: service-ca-operator-7496fb6588
+    namespace: openshift-service-ca-operator
+    ownerReferences:
+    - apiVersion: apps/v1
+      blockOwnerDeletion: true
+      controller: true
+      kind: Deployment
+      name: service-ca-operator
+      uid: 810abe63-5b12-4512-adda-87ba971928ed
+    resourceVersion: "10144"
+    uid: 6c7e7d19-caba-4a27-b444-3dd261291b1c
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: service-ca-operator
+        pod-template-hash: 7496fb6588
+    template:
+      metadata:
+        annotations:
+          target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
+        creationTimestamp: null
+        labels:
+          app: service-ca-operator
+          pod-template-hash: 7496fb6588
+        name: service-ca-operator
+      spec:
+        containers:
+        - args:
+          - --config=/var/run/configmaps/config/operator-config.yaml
+          - -v=4
+          command:
+          - service-ca-operator
+          - operator
+          env:
+          - name: CONTROLLER_IMAGE
+            value: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:bae0d375f54ca2a0bf5fac29d9aff7a99e6b1a1c85874d51ad1142a9b31cad02
+          - name: OPERATOR_IMAGE_VERSION
+            value: 4.10.0-0.nightly-2022-03-04-174335
+          image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:bae0d375f54ca2a0bf5fac29d9aff7a99e6b1a1c85874d51ad1142a9b31cad02
+          imagePullPolicy: IfNotPresent
+          name: service-ca-operator
+          resources:
+            requests:
+              cpu: 10m
+              memory: 80Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+          - mountPath: /var/run/configmaps/config
+            name: config
+          - mountPath: /var/run/secrets/serving-cert
+            name: serving-cert
+        dnsPolicy: ClusterFirst
+        priorityClassName: system-cluster-critical
+        restartPolicy: Always
+        schedulerName: default-scheduler
+        securityContext:
+          runAsGroup: 1001
+          runAsNonRoot: true
+          runAsUser: 1001
+        serviceAccount: service-ca-operator
+        serviceAccountName: service-ca-operator
+        terminationGracePeriodSeconds: 30
+        tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/master
+          operator: Exists
+        - effect: NoExecute
+          key: node.kubernetes.io/unreachable
+          operator: Exists
+          tolerationSeconds: 120
+        - effect: NoExecute
+          key: node.kubernetes.io/not-ready
+          operator: Exists
+          tolerationSeconds: 120
+        volumes:
+        - name: serving-cert
+          secret:
+            defaultMode: 420
+            optional: true
+            secretName: serving-cert
+        - configMap:
+            defaultMode: 420
+            name: service-ca-operator-config
+          name: config
+  status:
+    availableReplicas: 1
+    fullyLabeledReplicas: 1
+    observedGeneration: 1
+    readyReplicas: 1
+    replicas: 1
+kind: ReplicaSetList
+metadata:
+  resourceVersion: "188166"
