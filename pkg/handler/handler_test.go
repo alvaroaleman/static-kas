@@ -149,70 +149,50 @@ func TestServer(t *testing.T) {
 				if err := c.List(ctx, list); err != nil {
 					t.Fatalf("failed to list namespaces: %v", err)
 				}
-				if n := len(list.Items); n != 2 {
-					t.Errorf("expected to get exactly two namespacs back, got %d", n)
+				if n := len(list.Items); n != 3 {
+					t.Errorf("expected to get exactly three namespaces back, got %d", n)
 				}
 			},
 		},
 		{
 			name: "List pods table printing",
-			run: func(t *testing.T) {
-				table, err := requestTableOnPath(ctx, "/api/v1/pods")
-				if err != nil {
-					t.Fatalf("failed to get table for pods: %v", err)
-				}
-				if n := len(table.ColumnDefinitions); n != 9 {
-					t.Errorf("expected nine columns, got %d", n)
-				}
-				if n := len(table.Rows); n != 2 {
-					t.Errorf("expected to get two pods back, got %d", n)
-				}
-			},
+			run:  verifyTablePrinting(ctx, "/api/v1/pods", 9, 2),
 		},
 		{
 			name: "Get pod table printing",
-			run: func(t *testing.T) {
-				table, err := requestTableOnPath(ctx, "/api/v1/namespaces/openshift-network-operator/pods/network-operator-7887564c4-mjg9d")
-				if err != nil {
-					t.Fatalf("failed to get table for replicaset: %v", err)
-				}
-				if n := len(table.ColumnDefinitions); n != 9 {
-					t.Errorf("expected nine columns, got %d", n)
-				}
-				if n := len(table.Rows); n != 1 {
-					t.Errorf("expected to get one replicaset back, got %d", n)
-				}
-			},
+			run:  verifyTablePrinting(ctx, "/api/v1/namespaces/openshift-network-operator/pods/network-operator-7887564c4-mjg9d", 9, 1),
 		},
 		{
 			name: "List replicasets table printing",
-			run: func(t *testing.T) {
-				table, err := requestTableOnPath(ctx, "/apis/apps/v1/replicasets")
-				if err != nil {
-					t.Fatalf("failed to get table for replicaset: %v", err)
-				}
-				if n := len(table.ColumnDefinitions); n != 8 {
-					t.Errorf("expected eight columns, got %d", n)
-				}
-				if n := len(table.Rows); n != 2 {
-					t.Errorf("expected to get two replicasets back, got %d", n)
-				}
-			},
+			run:  verifyTablePrinting(ctx, "/apis/apps/v1/replicasets", 8, 2),
 		},
 		{
 			name: "Get replicaset table printing",
-			run: func(t *testing.T) {
-				table, err := requestTableOnPath(ctx, "/apis/apps/v1/namespaces/openshift-network-operator/replicasets/network-operator-7887564c4")
-				if err != nil {
-					t.Fatalf("failed to get table for replicaset: %v", err)
-				}
-				if n := len(table.ColumnDefinitions); n != 8 {
-					t.Errorf("expected eight columns, got %d", n)
-				}
-				if n := len(table.Rows); n != 1 {
-					t.Errorf("expected to get one replicaset back, got %d", n)
-				}
-			},
+			run:  verifyTablePrinting(ctx, "/apis/apps/v1/namespaces/openshift-network-operator/replicasets/network-operator-7887564c4", 8, 1),
+		},
+		{
+			name: "List deployments table printing",
+			run:  verifyTablePrinting(ctx, "/apis/apps/v1/deployments", 8, 2),
+		},
+		{
+			name: "Get deployments table printing",
+			run:  verifyTablePrinting(ctx, "/apis/apps/v1/namespaces/openshift-network-operator/deployments/network-operator", 8, 1),
+		},
+		{
+			name: "List statefulsets table printing",
+			run:  verifyTablePrinting(ctx, "/apis/apps/v1/statefulsets", 5, 2),
+		},
+		{
+			name: "Get statefulsets table printing",
+			run:  verifyTablePrinting(ctx, "/apis/apps/v1/namespaces/openshift-monitoring/statefulsets/prometheus-k8s", 5, 1),
+		},
+		{
+			name: "List daemonsets table printing",
+			run:  verifyTablePrinting(ctx, "/apis/apps/v1/daemonsets", 11, 1),
+		},
+		{
+			name: "Get daemonsets table printing",
+			run:  verifyTablePrinting(ctx, "/apis/apps/v1/namespaces/openshift-monitoring/daemonsets/node-exporter", 11, 1),
 		},
 	}
 
@@ -255,4 +235,19 @@ func requestTableOnPath(ctx context.Context, path string) (*metav1.Table, error)
 	}
 
 	return table, nil
+}
+
+func verifyTablePrinting(ctx context.Context, path string, expectNumColumns int, expectNumRows int) func(t *testing.T) {
+	return func(t *testing.T) {
+		table, err := requestTableOnPath(ctx, path)
+		if err != nil {
+			t.Fatalf("failed to get table for %s: %v", path, err)
+		}
+		if n := len(table.ColumnDefinitions); n != expectNumColumns {
+			t.Errorf("expected %d columns, got %d", expectNumColumns, n)
+		}
+		if n := len(table.Rows); n != expectNumRows {
+			t.Errorf("expected to get %d rows back, got %d", expectNumRows, n)
+		}
+	}
 }
