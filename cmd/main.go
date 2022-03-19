@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/alvaroaleman/static-kas/pkg/server"
+	"github.com/alvaroaleman/static-kas/pkg/handler"
 )
 
 type options struct {
@@ -35,7 +35,7 @@ func main() {
 		l.Fatal("--base-dir is mandatory")
 	}
 
-	router, err := server.New(l, o.baseDir)
+	router, err := handler.New(l, o.baseDir)
 	if err != nil {
 		l.Fatal("failed to construct server", zap.Error(err))
 	}

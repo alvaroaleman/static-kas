@@ -1,0 +1,23 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  creationTimestamp: "2022-03-04T18:06:42Z"
+  name: network-diagnostics
+  ownerReferences:
+  - apiVersion: operator.openshift.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Network
+    name: cluster
+    uid: 5f01a223-5e1d-45d0-8632-7824b587fab9
+  resourceVersion: "4803"
+  uid: 1208c422-7b53-43eb-9251-f9e47bac2e30
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: network-diagnostics
+subjects:
+- kind: ServiceAccount
+  name: network-diagnostics
+  namespace: openshift-network-diagnostics
