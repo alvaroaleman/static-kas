@@ -1,4 +1,4 @@
-package main
+package discovery
 
 // TODO: Import this somehow
 var shortNameMapping = map[string][]string{
