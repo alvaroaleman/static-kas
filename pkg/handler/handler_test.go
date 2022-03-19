@@ -38,7 +38,7 @@ func TestServer(t *testing.T) {
 	startTimer := time.NewTicker(5 * time.Second)
 	defer startTimer.Stop()
 	for {
-		time.Sleep(time.Second)
+		time.Sleep(25 * time.Millisecond)
 		select {
 		case <-startTimer.C:
 			t.Fatal("timed out waiting for server to be up")
