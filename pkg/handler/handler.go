@@ -47,7 +47,7 @@ func New(l *zap.Logger, baseDir string) (*mux.Router, error) {
 	}
 	allNamespaces := &unstructured.UnstructuredList{}
 	allNamespaces.SetAPIVersion("v1")
-	allNamespaces.SetKind("List")
+	allNamespaces.SetKind("NamespaceList")
 	namespacePath := filepath.Join(baseDir, "namespaces")
 	namespacesDirEntries, err := os.ReadDir(namespacePath)
 	if err != nil {
@@ -237,7 +237,7 @@ func New(l *zap.Logger, baseDir string) (*mux.Router, error) {
 			transformFunc = tableTransform(transformKey(vars, transform.VerbList), tableVersion(r))
 		}
 		if groupResourceMap[discovery.GroupVersionResource{GroupVersion: vars["group"] + "/" + vars["version"], Resource: vars["resource"]}].Namespaced {
-			if err := response.NewCrossNamespaceListResponse(r, w, filepath.Join(baseDir, "namespaces"), vars["group"], vars["resource"], transformFunc); err != nil {
+			if err := response.NewCrossNamespaceListResponse(r, w, filepath.Join(baseDir, "namespaces"), vars["group"], vars["resource"], transformFunc, filter.FromRequest(r)...); err != nil {
 				l.Error("failed to respond", zap.Error(err))
 			}
 		} else {

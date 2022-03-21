@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/http"
 	"testing"
@@ -10,13 +11,22 @@ import (
 
 	"go.uber.org/zap/zaptest"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/alvaroaleman/static-kas/pkg/handler"
 )
+
+func init() {
+	klog.InitFlags(flag.CommandLine)
+}
 
 func TestServer(t *testing.T) {
 	handler, err := handler.New(zaptest.NewLogger(t), "./testdata")
@@ -60,9 +70,20 @@ func TestServer(t *testing.T) {
 		break
 	}
 
-	c, err := client.New(&rest.Config{Host: "http://127.0.0.1:8080"}, client.Options{})
+	c, err := client.New(
+		&rest.Config{
+			Host: "http://127.0.0.1:8080",
+			// Prevent controller-runtime from defaulting to proto
+			ContentConfig: rest.ContentConfig{ContentType: "application/json"},
+		},
+		client.Options{},
+	)
 	if err != nil {
 		t.Fatalf("failed to construct client: %v", err)
+	}
+
+	if err := rbacv1.AddToScheme(c.Scheme()); err != nil {
+		t.Fatalf("failed to add rbacv1 to client scheme: %v", err)
 	}
 
 	tcs := []struct {
@@ -71,88 +92,112 @@ func TestServer(t *testing.T) {
 	}{
 		{
 			name: "List cluster-scoped core resource",
-			run: func(t *testing.T) {
-				list := unstructuredListFor("v1", "Node")
-				if err := c.List(ctx, list); err != nil {
-					t.Fatalf("failed to list nodes: %v", err)
-				}
-				if n := len(list.Items); n != 1 {
-					t.Errorf("expected to get a nodelist with one item, got %d items", n)
-				}
-			},
+			run:  verifyList(ctx, c, &corev1.NodeList{}, 1),
+		},
+		{
+			name: "List cluster-scoped core resoruce with label selector, match",
+			run:  verifyList(ctx, c, &corev1.NodeList{}, 1, client.MatchingLabels{"beta.kubernetes.io/arch": "amd64"}),
+		},
+		{
+			name: "List cluster-scoped core resoruce with label selector, no match",
+			run:  verifyList(ctx, c, &corev1.NodeList{}, 0, client.MatchingLabels{"beta.kubernetes.io/arch": "other"}),
+		},
+		{
+			name: "List cluster-scoped core resoruce with field selector, match",
+			run:  verifyList(ctx, c, &corev1.NodeList{}, 1, client.MatchingFields{"metadata.name": "ip-10-0-143-10.ec2.internal"}),
+		},
+		{
+			name: "List cluster-scoped core resource with field selector, no match",
+			run:  verifyList(ctx, c, &corev1.NodeList{}, 0, client.MatchingFields{"metadata.name": "other"}),
 		},
 		{
 			name: "List namespaced core resource from namespace",
-			run: func(t *testing.T) {
-				list := unstructuredListFor("v1", "Pod")
-				if err := c.List(ctx, list, client.InNamespace("openshift-network-operator")); err != nil {
-					t.Fatalf("failed to list pods from namespace openshift-network-operator: %v", err)
-				}
-				if n := len(list.Items); n != 1 {
-					t.Errorf("expected to get exactly one pod back, got %d", n)
-				}
-			},
+			run:  verifyList(ctx, c, &corev1.PodList{}, 1, client.InNamespace("openshift-network-operator")),
+		},
+		{
+			name: "List namespaced core resource from namespace with matching label selector",
+			run:  verifyList(ctx, c, &corev1.PodList{}, 1, client.InNamespace("openshift-network-operator"), client.MatchingLabels{"name": "network-operator"}),
+		},
+		{
+			name: "List namespaced core resource from namespace with non-matching label selector",
+			run:  verifyList(ctx, c, &corev1.PodList{}, 0, client.InNamespace("openshift-network-operator"), client.MatchingLabels{"name": "other"}),
+		},
+		{
+			name: "List namespaced core resource from namespace with matching field selector",
+			run:  verifyList(ctx, c, &corev1.PodList{}, 1, client.InNamespace("openshift-network-operator"), client.MatchingFields{"metadata.name": "network-operator-7887564c4-mjg9d"}),
+		},
+		{
+			name: "List namespaced core resource from namespace with non-matching field selector",
+			run:  verifyList(ctx, c, &corev1.PodList{}, 0, client.InNamespace("openshift-network-operator"), client.MatchingFields{"metadata.name": "other"}),
 		},
 		{
 			name: "List namespaced core object from all namespaces",
-			run: func(t *testing.T) {
-				list := unstructuredListFor("v1", "Pod")
-				if err := c.List(ctx, list); err != nil {
-					t.Fatalf("failed to list pods: %v", err)
-				}
-				if n := len(list.Items); n != 2 {
-					t.Errorf("expected to get exactly two pods back, got %d", n)
-				}
-			},
+			run:  verifyList(ctx, c, &corev1.PodList{}, 2),
+		},
+		{
+			name: "List namespaced core object from all namespaces with label selector matching one",
+			run:  verifyList(ctx, c, &corev1.PodList{}, 1, client.MatchingLabels{"name": "network-operator"}),
+		},
+		{
+			name: "List namespaced core object from all namespaces with field selector matching one",
+			run:  verifyList(ctx, c, &corev1.PodList{}, 1, client.MatchingFields{"metadata.name": "network-operator-7887564c4-mjg9d"}),
 		},
 		{
 			name: "List cluster-scoped non-core resource",
-			run: func(t *testing.T) {
-				list := unstructuredListFor("rbac.authorization.k8s.io/v1", "ClusterRoleBinding")
-				if err := c.List(ctx, list); err != nil {
-					t.Fatalf("failed to list clusterrolebindings: %v", err)
-				}
-				if n := len(list.Items); n != 1 {
-					t.Errorf("expected exactly one item, got %d", n)
-				}
-			},
+			run:  verifyList(ctx, c, &rbacv1.ClusterRoleBindingList{}, 1),
+		},
+		{
+			name: "List cluster-scoped non-core resource with matching label selector",
+			run:  verifyList(ctx, c, &rbacv1.ClusterRoleBindingList{}, 1, client.MatchingLabels{"foo": "bar"}),
+		},
+		{
+			name: "List cluster-scoped non-core resource with non-matching label selector",
+			run:  verifyList(ctx, c, &rbacv1.ClusterRoleBindingList{}, 0, client.MatchingLabels{"foo": "other"}),
+		},
+		{
+			name: "List cluster-scoped non-core resource with matching field selector",
+			run:  verifyList(ctx, c, &rbacv1.ClusterRoleBindingList{}, 1, client.MatchingFields{"metadata.name": "network-diagnostics"}),
+		},
+		{
+			name: "List cluster-scoped non-core resource with non-matching field selector",
+			run:  verifyList(ctx, c, &rbacv1.ClusterRoleBindingList{}, 0, client.MatchingFields{"metadata.name": "other"}),
 		},
 		{
 			name: "List namespaced non-core resource from namespace",
-			run: func(t *testing.T) {
-				list := unstructuredListFor("apps/v1", "Deployment")
-				if err := c.List(ctx, list, client.InNamespace("openshift-network-operator")); err != nil {
-					t.Fatalf("failed to list deployments in namespace openshift-network-operator: %v", err)
-				}
-				if n := len(list.Items); n != 1 {
-					t.Errorf("expected to get exactly one item, got %d", n)
-				}
-			},
+			run:  verifyList(ctx, c, &appsv1.DeploymentList{}, 1, client.InNamespace("openshift-network-operator")),
+		},
+		{
+			name: "List namespaced non-core resource from namespace with matching label selector",
+			run:  verifyList(ctx, c, &appsv1.DeploymentList{}, 1, client.InNamespace("openshift-network-operator"), client.MatchingLabels{"name": "network-operator"}),
+		},
+		{
+			name: "List namespaced non-core resource from namespace with non-matching label selector",
+			run:  verifyList(ctx, c, &appsv1.DeploymentList{}, 0, client.InNamespace("openshift-network-operator"), client.MatchingLabels{"name": "other"}),
+		},
+		{
+			name: "List namespaced non-core resource from namespace with matching field selector",
+			run:  verifyList(ctx, c, &appsv1.DeploymentList{}, 1, client.InNamespace("openshift-network-operator"), client.MatchingFields{"metadata.name": "network-operator"}),
+		},
+		{
+			name: "List namespaced non-core resource from namespace with non-matching label selector",
+			run:  verifyList(ctx, c, &appsv1.DeploymentList{}, 0, client.InNamespace("openshift-network-operator"), client.MatchingFields{"metadata.name": "other"}),
 		},
 		{
 			name: "List namespaced non-core resource from all namespaces",
-			run: func(t *testing.T) {
-				list := unstructuredListFor("apps/v1", "Deployment")
-				if err := c.List(ctx, list); err != nil {
-					t.Fatalf("failed to list deployments: %v", err)
-				}
-				if n := len(list.Items); n != 2 {
-					t.Errorf("expected to get exactly two items, got %d", n)
-				}
-			},
+			run:  verifyList(ctx, c, &appsv1.DeploymentList{}, 2),
+		},
+		{
+			name: "List namespaced non-core resource from all namespaces with label selector matching one object",
+			run:  verifyList(ctx, c, &appsv1.DeploymentList{}, 1, client.MatchingLabels{"name": "network-operator"}),
+		},
+		{
+			name: "List namespaced non-core resource from all namespaces with field selector matching one object",
+			run:  verifyList(ctx, c, &appsv1.DeploymentList{}, 1, client.MatchingFields{"metadata.name": "network-operator"}),
 		},
 		{
 			// These are special because they are not in the dump
 			name: "Listing namespaces",
-			run: func(t *testing.T) {
-				list := unstructuredListFor("v1", "Namespace")
-				if err := c.List(ctx, list); err != nil {
-					t.Fatalf("failed to list namespaces: %v", err)
-				}
-				if n := len(list.Items); n != 3 {
-					t.Errorf("expected to get exactly three namespaces back, got %d", n)
-				}
-			},
+			run:  verifyList(ctx, c, &corev1.NamespaceList{}, 3),
 		},
 		{
 			name: "List pods table printing",
@@ -248,6 +293,21 @@ func verifyTablePrinting(ctx context.Context, path string, expectNumColumns int,
 		}
 		if n := len(table.Rows); n != expectNumRows {
 			t.Errorf("expected to get %d rows back, got %d", expectNumRows, n)
+		}
+	}
+}
+
+func verifyList(ctx context.Context, c client.Client, list client.ObjectList, numExpected int, listOpts ...client.ListOption) func(t *testing.T) {
+	return func(t *testing.T) {
+		if err := c.List(ctx, list, listOpts...); err != nil {
+			t.Fatalf("failed to list %T: %v", list, err)
+		}
+		items, err := apimeta.ExtractList(list)
+		if err != nil {
+			t.Fatalf("failed to extract items from list: %v", err)
+		}
+		if n := len(items); n != numExpected {
+			t.Errorf("expected to get %T with exactly %d items back, got %d", list, numExpected, n)
 		}
 	}
 }

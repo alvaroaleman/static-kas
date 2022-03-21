@@ -110,9 +110,18 @@ func ReadAndDeserializeList(parenDir, resourceName string) (*unstructured.Unstru
 		}
 		if !strings.HasSuffix(target.GetKind(), "List") {
 			result.Items = []unstructured.Unstructured{*target}
+			result.SetAPIVersion(result.Items[0].GetAPIVersion())
+			result.SetKind(result.Items[0].GetKind() + "List")
 			return result, nil
 		}
-		return result, yaml.Unmarshal(fileContents[0], result)
+		if err := yaml.Unmarshal(fileContents[0], result); err != nil {
+			return nil, err
+		}
+		if len(result.Items) > 0 {
+			result.SetAPIVersion(result.Items[0].GetAPIVersion())
+			result.SetKind(result.Items[0].GetKind() + "List")
+		}
+		return result, nil
 	default:
 		for _, fileContent := range fileContents {
 			target := &unstructured.Unstructured{}
@@ -122,6 +131,10 @@ func ReadAndDeserializeList(parenDir, resourceName string) (*unstructured.Unstru
 			result.Items = append(result.Items, *target)
 		}
 
+		if len(result.Items) > 0 {
+			result.SetAPIVersion(result.Items[0].GetAPIVersion())
+			result.SetKind(result.Items[0].GetKind() + "List")
+		}
 		return result, nil
 	}
 
