@@ -66,6 +66,10 @@ func readAndDeserializeForAllNamespaces(parentDir, group, resource string) (*uns
 		}
 		result.Items = append(result.Items, fromNamespace.Items...)
 	}
+	if len(result.Items) > 0 {
+		result.SetAPIVersion(result.Items[0].GetAPIVersion())
+		result.SetKind(result.Items[0].GetKind() + "List")
+	}
 
 	return result, nil
 }

@@ -4,6 +4,8 @@ kind: ClusterRoleBinding
 metadata:
   creationTimestamp: "2022-03-04T18:06:42Z"
   name: network-diagnostics
+  labels:
+    foo: bar
   ownerReferences:
   - apiVersion: operator.openshift.io/v1
     blockOwnerDeletion: true
