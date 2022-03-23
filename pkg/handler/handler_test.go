@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -12,13 +13,17 @@ import (
 	"go.uber.org/zap/zaptest"
 
 	appsv1 "k8s.io/api/apps/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
+	utilpointer "k8s.io/utils/pointer"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/alvaroaleman/static-kas/pkg/handler"
@@ -70,20 +75,36 @@ func TestServer(t *testing.T) {
 		break
 	}
 
-	c, err := client.New(
-		&rest.Config{
-			Host: "http://127.0.0.1:8080",
-			// Prevent controller-runtime from defaulting to proto
-			ContentConfig: rest.ContentConfig{ContentType: "application/json"},
-		},
-		client.Options{},
-	)
+	cfg := &rest.Config{
+		Host: "http://127.0.0.1:8080",
+		// Prevent controller-runtime from defaulting to proto
+		ContentConfig: rest.ContentConfig{ContentType: "application/json"},
+	}
+
+	c, err := client.New(cfg, client.Options{})
 	if err != nil {
-		t.Fatalf("failed to construct client: %v", err)
+		t.Fatalf("failed to construct controller-runtime client: %v", err)
+	}
+	corev1Client, err := corev1client.NewForConfig(cfg)
+	if err != nil {
+		t.Fatalf("failed to construct corev1 client: %v", err)
+	}
+	cache, err := cache.New(cfg, cache.Options{Scheme: c.Scheme(), Mapper: c.RESTMapper()})
+	if err != nil {
+		t.Fatalf("failed to construct cache: %v", err)
+	}
+	go func() {
+		cache.Start(ctx)
+	}()
+	if synced := cache.WaitForCacheSync(ctx); !synced {
+		t.Fatalf("failed to watch for cache sync: %v", err)
 	}
 
 	if err := rbacv1.AddToScheme(c.Scheme()); err != nil {
 		t.Fatalf("failed to add rbacv1 to client scheme: %v", err)
+	}
+	if err := authorizationv1.AddToScheme(c.Scheme()); err != nil {
+		t.Fatalf("failed to add authorizationv1 to client scheme: %v", err)
 	}
 
 	tcs := []struct {
@@ -91,8 +112,16 @@ func TestServer(t *testing.T) {
 		run  func(*testing.T)
 	}{
 		{
+			name: "Get cluster-scoped resource",
+			run:  verifyGet(ctx, c, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "ip-10-0-143-10.ec2.internal"}}),
+		},
+		{
 			name: "List cluster-scoped core resource",
 			run:  verifyList(ctx, c, &corev1.NodeList{}, 1),
+		},
+		{
+			name: "List cluster-scoped core resource from cache",
+			run:  verifyList(ctx, cache, &corev1.NodeList{}, 1),
 		},
 		{
 			name: "List cluster-scoped core resoruce with label selector, match",
@@ -111,8 +140,16 @@ func TestServer(t *testing.T) {
 			run:  verifyList(ctx, c, &corev1.NodeList{}, 0, client.MatchingFields{"metadata.name": "other"}),
 		},
 		{
+			name: "Get namespaced core resource",
+			run:  verifyGet(ctx, c, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "openshift-network-operator", Name: "network-operator-7887564c4-mjg9d"}}),
+		},
+		{
 			name: "List namespaced core resource from namespace",
 			run:  verifyList(ctx, c, &corev1.PodList{}, 1, client.InNamespace("openshift-network-operator")),
+		},
+		{
+			name: "List namespaced core resource from cache",
+			run:  verifyList(ctx, cache, &corev1.PodList{}, 1, client.InNamespace("openshift-network-operator")),
 		},
 		{
 			name: "List namespaced core resource from namespace with matching label selector",
@@ -143,8 +180,16 @@ func TestServer(t *testing.T) {
 			run:  verifyList(ctx, c, &corev1.PodList{}, 1, client.MatchingFields{"metadata.name": "network-operator-7887564c4-mjg9d"}),
 		},
 		{
+			name: "Get cluster-scoped non-core resource",
+			run:  verifyGet(ctx, c, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "network-diagnostics"}}),
+		},
+		{
 			name: "List cluster-scoped non-core resource",
 			run:  verifyList(ctx, c, &rbacv1.ClusterRoleBindingList{}, 1),
+		},
+		{
+			name: "List cluster-scoped non-core resource from cache",
+			run:  verifyList(ctx, cache, &rbacv1.ClusterRoleBindingList{}, 1),
 		},
 		{
 			name: "List cluster-scoped non-core resource with matching label selector",
@@ -163,8 +208,16 @@ func TestServer(t *testing.T) {
 			run:  verifyList(ctx, c, &rbacv1.ClusterRoleBindingList{}, 0, client.MatchingFields{"metadata.name": "other"}),
 		},
 		{
+			name: "Get namespaced non-core resource",
+			run:  verifyGet(ctx, c, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "openshift-network-operator", Name: "network-operator"}}),
+		},
+		{
 			name: "List namespaced non-core resource from namespace",
 			run:  verifyList(ctx, c, &appsv1.DeploymentList{}, 1, client.InNamespace("openshift-network-operator")),
+		},
+		{
+			name: "List namespaced non-core resource from cache",
+			run:  verifyList(ctx, cache, &appsv1.DeploymentList{}, 1, client.InNamespace("openshift-network-operator")),
 		},
 		{
 			name: "List namespaced non-core resource from namespace with matching label selector",
@@ -195,9 +248,38 @@ func TestServer(t *testing.T) {
 			run:  verifyList(ctx, c, &appsv1.DeploymentList{}, 1, client.MatchingFields{"metadata.name": "network-operator"}),
 		},
 		{
+			name: "Self-subject access review always gets approved",
+			run: func(t *testing.T) {
+				ssar := &authorizationv1.SelfSubjectAccessReview{}
+				if err := c.Create(ctx, ssar); err != nil {
+					t.Fatalf("failed to create self-subject access review: %v", err)
+				}
+				if !ssar.Status.Allowed {
+					t.Error("expected ssar to be allowed, wasn't the case")
+				}
+			},
+		},
+		{
+			// These are special because they are not in the dump
+			name: "Get namespace",
+			run:  verifyGet(ctx, c, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "openshift-network-operator"}}),
+		},
+		{
 			// These are special because they are not in the dump
 			name: "Listing namespaces",
-			run:  verifyList(ctx, c, &corev1.NamespaceList{}, 3),
+			run:  verifyList(ctx, c, &corev1.NamespaceList{}, 4),
+		},
+		{
+			name: "List when objects are stored as distinct files",
+			run:  verifyList(ctx, c, unstructuredListFor("monitoring.coreos.com/v1", "ServiceMonitor"), 2),
+		},
+		{
+			name: "List nodes table printing",
+			run:  verifyTablePrinting(ctx, "/api/v1/nodes", 1, 1),
+		},
+		{
+			name: "Get node table printing",
+			run:  verifyTablePrinting(ctx, "/api/v1/nodes/ip-10-0-143-10.ec2.internal", 1, 1),
 		},
 		{
 			name: "List pods table printing",
@@ -220,6 +302,10 @@ func TestServer(t *testing.T) {
 			run:  verifyTablePrinting(ctx, "/apis/apps/v1/deployments", 8, 2),
 		},
 		{
+			name: "List deployments in namespace table printing",
+			run:  verifyTablePrinting(ctx, "/apis/apps/v1/namespaces/openshift-network-operator/deployments", 8, 1),
+		},
+		{
 			name: "Get deployments table printing",
 			run:  verifyTablePrinting(ctx, "/apis/apps/v1/namespaces/openshift-network-operator/deployments/network-operator", 8, 1),
 		},
@@ -238,6 +324,144 @@ func TestServer(t *testing.T) {
 		{
 			name: "Get daemonsets table printing",
 			run:  verifyTablePrinting(ctx, "/apis/apps/v1/namespaces/openshift-monitoring/daemonsets/node-exporter", 11, 1),
+		},
+		{
+			name: "List tableprinting uses CRDs additionalPrinterColumns",
+			run:  verifyTablePrinting(ctx, "/apis/config.openshift.io/v1/clusteroperators/console", 6, 1),
+		},
+		{
+			name: "Get tableprinting uses CRDs additionalPrinterColumns",
+			run:  verifyTablePrinting(ctx, "/apis/config.openshift.io/v1/clusteroperators", 6, 1),
+		},
+		{
+			name: "List for CRD without CRD manifest returns valid table",
+			run:  verifyTablePrinting(ctx, "/apis/network.openshift.io/v1/clusternetworks", 1, 1),
+		},
+		{
+			name: "Get for CRD without CRD manifest returns valid table",
+			run:  verifyTablePrinting(ctx, "/apis/network.openshift.io/v1/clusternetworks/default", 1, 1),
+		},
+		{
+			name: "Get pod logs",
+			run: verifyGetLogs(ctx,
+				corev1Client,
+				"openshift-network-operator",
+				"network-operator-7887564c4-mjg9d",
+				"Current first line\nCurrent second line\n",
+				func(o *corev1.PodLogOptions) { o.Container = "network-operator" },
+			),
+		},
+		{
+			name: "Get pod logs with follow",
+			run: func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+				defer cancel()
+
+				o := &corev1.PodLogOptions{
+					Container: "network-operator",
+					Follow:    true,
+				}
+				logs, err := corev1Client.
+					Pods("openshift-network-operator").
+					GetLogs("network-operator-7887564c4-mjg9d", o).
+					DoRaw(ctx)
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Errorf("expected err to be %s, was %s", context.DeadlineExceeded, err)
+				}
+				if actual, expected := string(logs), "Current first line\nCurrent second line\n"; actual != expected {
+					t.Errorf("expected log to be %q, was %q", expected, actual)
+				}
+			},
+		},
+		{
+			name: "Get pod logs alternate file layout",
+			run: verifyGetLogs(ctx,
+				corev1Client,
+				"openshift-service-ca-operator",
+				"service-ca-operator-7496fb6588-2zznl",
+				"Current first line\nCurrent second line\n",
+				func(o *corev1.PodLogOptions) { o.Container = "service-ca-operator" },
+			),
+		},
+		{
+			name: "Get pod logs with tail",
+			run: verifyGetLogs(ctx,
+				corev1Client,
+				"openshift-network-operator",
+				"network-operator-7887564c4-mjg9d",
+				"Current second line\n",
+				func(o *corev1.PodLogOptions) {
+					o.Container = "network-operator"
+					o.TailLines = utilpointer.Int64(1)
+				},
+			),
+		},
+		{
+			name: "Get pod logs alternate file layout with tail",
+			run: verifyGetLogs(ctx,
+				corev1Client,
+				"openshift-service-ca-operator",
+				"service-ca-operator-7496fb6588-2zznl",
+				"Current second line\n",
+				func(o *corev1.PodLogOptions) {
+					o.Container = "service-ca-operator"
+					o.TailLines = utilpointer.Int64(1)
+				},
+			),
+		},
+		{
+			name: "Get pod logs for previous",
+			run: verifyGetLogs(ctx,
+				corev1Client,
+				"openshift-network-operator",
+				"network-operator-7887564c4-mjg9d",
+				"Previous first line\nPrevious second line\n",
+				func(o *corev1.PodLogOptions) {
+					o.Container = "network-operator"
+					o.Previous = true
+				},
+			),
+		},
+		{
+			name: "Get pod logs alternate file layout for previous",
+			run: verifyGetLogs(ctx,
+				corev1Client,
+				"openshift-service-ca-operator",
+				"service-ca-operator-7496fb6588-2zznl",
+				"Previous first line\nPrevious second line\n",
+				func(o *corev1.PodLogOptions) {
+					o.Container = "service-ca-operator"
+					o.Previous = true
+				},
+			),
+		},
+		{
+			name: "Get pod logs for previous with tail",
+			run: verifyGetLogs(ctx,
+				corev1Client,
+				"openshift-network-operator",
+				"network-operator-7887564c4-mjg9d",
+				"Previous second line\n",
+				func(o *corev1.PodLogOptions) {
+					o.Container = "network-operator"
+					o.Previous = true
+					o.TailLines = utilpointer.Int64(1)
+				},
+			),
+		},
+		{
+			name: "Get pod logs alternate file layout for previous with tail",
+			run: verifyGetLogs(ctx,
+				corev1Client,
+				"openshift-service-ca-operator",
+				"service-ca-operator-7496fb6588-2zznl",
+				"Previous second line\n",
+				func(o *corev1.PodLogOptions) {
+					o.Container = "service-ca-operator"
+					o.Previous = true
+					o.TailLines = utilpointer.Int64(1)
+				},
+			),
 		},
 	}
 
@@ -258,12 +482,12 @@ func unstructuredListFor(apiVersion, kind string) *unstructured.UnstructuredList
 	return u
 }
 
-func requestTableOnPath(ctx context.Context, path string) (*metav1.Table, error) {
+func requestTableOnPath(ctx context.Context, path string, version string) (*metav1.Table, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1:8080"+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct request: %w", err)
 	}
-	req.Header.Set("Accept", "application/json;as=Table;v=v1;g=meta.k8s.io")
+	req.Header.Set("Accept", fmt.Sprintf("application/json;as=Table;v=%s;g=meta.k8s.io", version))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to do http request: %w", err)
@@ -284,20 +508,29 @@ func requestTableOnPath(ctx context.Context, path string) (*metav1.Table, error)
 
 func verifyTablePrinting(ctx context.Context, path string, expectNumColumns int, expectNumRows int) func(t *testing.T) {
 	return func(t *testing.T) {
-		table, err := requestTableOnPath(ctx, path)
-		if err != nil {
-			t.Fatalf("failed to get table for %s: %v", path, err)
-		}
-		if n := len(table.ColumnDefinitions); n != expectNumColumns {
-			t.Errorf("expected %d columns, got %d", expectNumColumns, n)
-		}
-		if n := len(table.Rows); n != expectNumRows {
-			t.Errorf("expected to get %d rows back, got %d", expectNumRows, n)
+		for _, version := range []string{"v1", "v1beta1"} {
+			t.Run("version "+version, func(t *testing.T) {
+				version := version
+				t.Parallel()
+				table, err := requestTableOnPath(ctx, path, version)
+				if err != nil {
+					t.Fatalf("failed to get table for %s: %v", path, err)
+				}
+				if n := len(table.ColumnDefinitions); n != expectNumColumns {
+					t.Errorf("expected %d columns, got %d", expectNumColumns, n)
+				}
+				if n := len(table.Rows); n != expectNumRows {
+					t.Errorf("expected to get %d rows back, got %d", expectNumRows, n)
+				}
+				if expected := "meta.k8s.io/" + version; table.APIVersion != expected {
+					t.Errorf("expected to get table back in requested version %s, got %s", expected, table.APIVersion)
+				}
+			})
 		}
 	}
 }
 
-func verifyList(ctx context.Context, c client.Client, list client.ObjectList, numExpected int, listOpts ...client.ListOption) func(t *testing.T) {
+func verifyList(ctx context.Context, c client.Reader, list client.ObjectList, numExpected int, listOpts ...client.ListOption) func(t *testing.T) {
 	return func(t *testing.T) {
 		if err := c.List(ctx, list, listOpts...); err != nil {
 			t.Fatalf("failed to list %T: %v", list, err)
@@ -308,6 +541,34 @@ func verifyList(ctx context.Context, c client.Client, list client.ObjectList, nu
 		}
 		if n := len(items); n != numExpected {
 			t.Errorf("expected to get %T with exactly %d items back, got %d", list, numExpected, n)
+		}
+	}
+}
+
+func verifyGet(ctx context.Context, c client.Client, obj client.Object) func(t *testing.T) {
+	return func(t *testing.T) {
+		if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+			t.Errorf("failed to get %T %s: %v", obj, client.ObjectKeyFromObject(obj), err)
+		}
+	}
+}
+
+func verifyGetLogs(ctx context.Context, c corev1client.CoreV1Interface, namespace, podName, expectedLog string, opts ...func(*corev1.PodLogOptions)) func(*testing.T) {
+	return func(t *testing.T) {
+		o := &corev1.PodLogOptions{}
+		for _, opt := range opts {
+			opt(o)
+		}
+
+		logs, err := c.
+			Pods(namespace).
+			GetLogs(podName, o).
+			DoRaw(ctx)
+		if err != nil {
+			t.Fatalf("failed to get logs: %v", err)
+		}
+		if actual := string(logs); actual != expectedLog {
+			t.Errorf("expected to get %q as log, got %q", expectedLog, actual)
 		}
 	}
 }

@@ -305,7 +305,7 @@ func apiGroupList(rl map[string]*metav1.APIResourceList) (*metav1.APIGroupList, 
 		}
 		split := strings.Split(groupVersion, "/")
 		if len(split) != 2 {
-			return nil, fmt.Errorf("groupVErsion %q does not yield exactly two result when slash splitting", groupVersion)
+			return nil, fmt.Errorf("groupVersion %q does not yield exactly two result when slash splitting", groupVersion)
 		}
 
 		// TODO: This assumes there is never more than one version, is this safe?

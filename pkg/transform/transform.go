@@ -151,7 +151,6 @@ func NewTableTransformMap(crds map[string]*apiextensionsv1.CustomResourceDefinit
 }
 
 func additionalPrinterColumsForCRD(key TransformEntryKey, crds map[string]*apiextensionsv1.CustomResourceDefinition) []apiextensionsv1.CustomResourceColumnDefinition {
-
 	crd, found := crds[key.ResourceName+"."+key.GroupName]
 	if !found {
 		return nil

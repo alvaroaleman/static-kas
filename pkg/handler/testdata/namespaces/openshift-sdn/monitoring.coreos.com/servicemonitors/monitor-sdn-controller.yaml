@@ -1,0 +1,37 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  annotations:
+    networkoperator.openshift.io/ignore-errors: ""
+  creationTimestamp: "2022-03-04T18:06:42Z"
+  generation: 1
+  labels:
+    app: sdn-controller
+  name: monitor-sdn-controller
+  namespace: openshift-sdn
+  ownerReferences:
+  - apiVersion: operator.openshift.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Network
+    name: cluster
+    uid: 5f01a223-5e1d-45d0-8632-7824b587fab9
+  resourceVersion: "4696"
+  uid: f3db3bb0-e7b2-489d-a389-366727fba26a
+spec:
+  endpoints:
+  - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+    interval: 30s
+    port: controller-metrics
+    scheme: https
+    tlsConfig:
+      caFile: /etc/prometheus/configmaps/serving-certs-ca-bundle/service-ca.crt
+      serverName: sdn-controller.openshift-sdn.svc
+  jobLabel: app
+  namespaceSelector:
+    matchNames:
+    - openshift-sdn
+  selector:
+    matchLabels:
+      app: sdn-controller

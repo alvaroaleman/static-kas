@@ -1,0 +1,25 @@
+---
+apiVersion: network.openshift.io/v1
+clusterNetworks:
+- CIDR: 10.132.0.0/14
+  hostSubnetLength: 9
+hostsubnetlength: 9
+kind: ClusterNetwork
+metadata:
+  creationTimestamp: "2022-03-04T18:06:42Z"
+  generation: 1
+  name: default
+  ownerReferences:
+  - apiVersion: operator.openshift.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Network
+    name: cluster
+    uid: 5f01a223-5e1d-45d0-8632-7824b587fab9
+  resourceVersion: "4672"
+  uid: e8be8875-4798-4271-80ed-9cf48fbb8808
+mtu: 8951
+network: 10.132.0.0/14
+pluginName: redhat/openshift-ovs-networkpolicy
+serviceNetwork: 172.31.0.0/16
+vxlanPort: 4789
