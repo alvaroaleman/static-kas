@@ -133,6 +133,18 @@ func Discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceLis
 	})
 
 	wg.Wait()
+
+	if result["authorization.k8s.io/v1"] == nil {
+		result["authorization.k8s.io/v1"] = &metav1.APIResourceList{
+			GroupVersion: "authorization.k8s.io/v1",
+		}
+	}
+	result["authorization.k8s.io/v1"].APIResources = append(result["authorization.k8s.io/v1"].APIResources, metav1.APIResource{
+		Name:       "selfsubjectaccessreviews",
+		Namespaced: false,
+		Kind:       "SelfSubjectAccessReview",
+		Verbs:      []string{"create"},
+	})
 	return result, apiResources, crdMap, utilerrors.NewAggregate(errs.errs)
 }
 
