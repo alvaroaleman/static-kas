@@ -17,6 +17,7 @@ clusters:
 contexts:
 - context:
     cluster: static-kas
+    user: ""
     namespace: default
   name: static-kas
 current-context: static-kas
