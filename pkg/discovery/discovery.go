@@ -82,7 +82,7 @@ func Discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceLis
 				groupVersion, _, _ = unstructured.NestedString(items[0].(map[string]interface{}), "apiVersion")
 
 				if groupVersion == "" {
-					groupVersion, _, _ = unstructured.NestedString(u.Object, "apiVersion")
+					groupVersion = u.GetAPIVersion()
 				}
 			} else {
 				pathElements := strings.Split(path, "/")
