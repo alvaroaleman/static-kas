@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -69,6 +70,26 @@ func TestServer(t *testing.T) {
 			if resp.StatusCode != 200 {
 				t.Logf("Got a non-200 statuscode of %d when checking if server is up", resp.StatusCode)
 				continue
+			}
+			defer resp.Body.Close()
+			bodyBytes, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Logf("encountered error when getting server version: %v", err)
+				continue
+			}
+			var serverVersion map[string]string
+			err = json.Unmarshal(bodyBytes, &serverVersion)
+			if err != nil {
+				t.Logf("encountered error when parsing server version: %v", err)
+				continue
+			}
+			goVersion, ok := serverVersion["goVersion"]
+			if !ok {
+				t.Logf("encountered error when parsing server version: %v", err)
+				continue
+			}
+			if goVersion != "go1.16.8" {
+				t.Errorf("expected goVersion to be %q, was %q", "go1.16.8", goVersion)
 			}
 			startTimer.Stop()
 		}
