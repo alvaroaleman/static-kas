@@ -267,7 +267,7 @@ func TestServer(t *testing.T) {
 		{
 			// These are special because they are not in the dump
 			name: "Listing namespaces",
-			run:  verifyList(ctx, c, &corev1.NamespaceList{}, 4),
+			run:  verifyList(ctx, c, &corev1.NamespaceList{}, 5),
 		},
 		{
 			name: "List when objects are stored as distinct files",
@@ -343,7 +343,7 @@ func TestServer(t *testing.T) {
 		},
 		{
 			name: "List services (Cilium sysdump list format)",
-			run:  verifyTablePrinting(ctx, "/api/v1/namespaces/kube-system/services", 1, 2),
+			run:  verifyList(ctx, c, &corev1.ServiceList{}, 2),
 		},
 		{
 			name: "Get pod logs",
