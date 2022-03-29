@@ -72,7 +72,7 @@ func New(l *zap.Logger, baseDir string) (*mux.Router, error) {
 			if os.IsNotExist(err) {
 				l.Info("no version file found")
 			} else {
-				l.Error("failed to read version file, defaulting to empty")
+				l.Error("failed to read version file, defaulting to empty", zap.Error(err))
 			}
 			w.Write([]byte(`{}`))
 			return
