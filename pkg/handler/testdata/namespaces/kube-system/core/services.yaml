@@ -1,0 +1,154 @@
+---
+apiVersion: v1
+items:
+- metadata:
+    annotations:
+      meta.helm.sh/release-name: aws-load-balancer-controller
+      meta.helm.sh/release-namespace: kube-system
+    creationTimestamp: '2022-01-10T13:18:14Z'
+    labels:
+      app.kubernetes.io/instance: aws-load-balancer-controller
+      app.kubernetes.io/managed-by: Helm
+      app.kubernetes.io/name: aws-load-balancer-controller
+      app.kubernetes.io/version: v2.3.1
+      helm.sh/chart: aws-load-balancer-controller-1.3.3
+      helm.toolkit.fluxcd.io/name: aws-load-balancer-controller
+      helm.toolkit.fluxcd.io/namespace: kube-system
+    managedFields:
+    - apiVersion: v1
+      fieldsType: FieldsV1
+      fieldsV1:
+        f:metadata:
+          f:annotations:
+            ".": {}
+            f:meta.helm.sh/release-name: {}
+            f:meta.helm.sh/release-namespace: {}
+          f:labels:
+            ".": {}
+            f:app.kubernetes.io/instance: {}
+            f:app.kubernetes.io/managed-by: {}
+            f:app.kubernetes.io/name: {}
+            f:app.kubernetes.io/version: {}
+            f:helm.sh/chart: {}
+            f:helm.toolkit.fluxcd.io/name: {}
+            f:helm.toolkit.fluxcd.io/namespace: {}
+        f:spec:
+          f:ports:
+            ".": {}
+            k:{"port":443,"protocol":"TCP"}:
+              ".": {}
+              f:port: {}
+              f:protocol: {}
+              f:targetPort: {}
+          f:selector:
+            ".": {}
+            f:app.kubernetes.io/instance: {}
+            f:app.kubernetes.io/name: {}
+          f:sessionAffinity: {}
+          f:type: {}
+      manager: helm-controller
+      operation: Update
+      time: '2022-01-10T13:18:13Z'
+    name: aws-load-balancer-webhook-service
+    namespace: kube-system
+    resourceVersion: '11497649'
+    uid: 2c07259f-8b38-4552-8a4e-583cd6916869
+  spec:
+    clusterIP: 172.20.252.52
+    clusterIPs:
+    - 172.20.252.52
+    ipFamilies:
+    - IPv4
+    ipFamilyPolicy: SingleStack
+    ports:
+    - port: 443
+      protocol: TCP
+      targetPort: webhook-server
+    selector:
+      app.kubernetes.io/instance: aws-load-balancer-controller
+      app.kubernetes.io/name: aws-load-balancer-controller
+    sessionAffinity: None
+    type: ClusterIP
+  status:
+    loadBalancer: {}
+- metadata:
+    annotations:
+      meta.helm.sh/release-name: cert-manager
+      meta.helm.sh/release-namespace: kube-system
+    creationTimestamp: '2022-01-26T10:13:24Z'
+    labels:
+      app: cert-manager
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/instance: cert-manager
+      app.kubernetes.io/managed-by: Helm
+      app.kubernetes.io/name: cert-manager
+      app.kubernetes.io/version: v1.6.1
+      helm.sh/chart: cert-manager-v1.6.1
+      helm.toolkit.fluxcd.io/name: cert-manager
+      helm.toolkit.fluxcd.io/namespace: kube-system
+    managedFields:
+    - apiVersion: v1
+      fieldsType: FieldsV1
+      fieldsV1:
+        f:metadata:
+          f:annotations:
+            ".": {}
+            f:meta.helm.sh/release-name: {}
+            f:meta.helm.sh/release-namespace: {}
+          f:labels:
+            ".": {}
+            f:app: {}
+            f:app.kubernetes.io/component: {}
+            f:app.kubernetes.io/instance: {}
+            f:app.kubernetes.io/managed-by: {}
+            f:app.kubernetes.io/name: {}
+            f:app.kubernetes.io/version: {}
+            f:helm.sh/chart: {}
+            f:helm.toolkit.fluxcd.io/name: {}
+            f:helm.toolkit.fluxcd.io/namespace: {}
+        f:spec:
+          f:ports:
+            ".": {}
+            k:{"port":9402,"protocol":"TCP"}:
+              ".": {}
+              f:name: {}
+              f:port: {}
+              f:protocol: {}
+              f:targetPort: {}
+          f:selector:
+            ".": {}
+            f:app.kubernetes.io/component: {}
+            f:app.kubernetes.io/instance: {}
+            f:app.kubernetes.io/name: {}
+          f:sessionAffinity: {}
+          f:type: {}
+      manager: helm-controller
+      operation: Update
+      time: '2022-01-26T10:13:24Z'
+    name: cert-manager
+    namespace: kube-system
+    resourceVersion: '10893267'
+    uid: c1bbd9b4-46a1-47d3-8ca7-d58bb36bd853
+  spec:
+    clusterIP: 172.20.233.178
+    clusterIPs:
+    - 172.20.233.178
+    ipFamilies:
+    - IPv4
+    ipFamilyPolicy: SingleStack
+    ports:
+    - name: tcp-prometheus-servicemonitor
+      port: 9402
+      protocol: TCP
+      targetPort: 9402
+    selector:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/instance: cert-manager
+      app.kubernetes.io/name: cert-manager
+    sessionAffinity: None
+    type: ClusterIP
+  status:
+    loadBalancer: {}
+kind: ServiceList
+metadata:
+  resourceVersion: '41828842'
