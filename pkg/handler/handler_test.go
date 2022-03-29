@@ -342,6 +342,10 @@ func TestServer(t *testing.T) {
 			run:  verifyTablePrinting(ctx, "/apis/network.openshift.io/v1/clusternetworks/default", 1, 1),
 		},
 		{
+			name: "List services (Cilium sysdump list format)",
+			run:  verifyTablePrinting(ctx, "/api/v1/namespaces/kube-system/services", 1, 2),
+		},
+		{
 			name: "Get pod logs",
 			run: verifyGetLogs(ctx,
 				corev1Client,
