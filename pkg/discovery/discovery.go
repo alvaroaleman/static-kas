@@ -32,6 +32,9 @@ func Discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceLis
 	lock := sync.Mutex{}
 	wg := sync.WaitGroup{}
 
+	// Limit the concurency somewhat to avoid hitting the open files ulimit
+	concurency := make(chan struct{}, 500)
+
 	filepath.WalkDir(basePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			errs.add(fmt.Errorf("error walking at %s: %w", path, err))
@@ -44,7 +47,9 @@ func Discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceLis
 		// TODO: Optimize by stopping here if the group and object are already discovered
 		// this likely requires to key the map by group and not by groupVersion
 		go func() {
+			concurency <- struct{}{}
 			defer wg.Done()
+			defer func() { <-concurency }()
 			raw, err := ioutil.ReadFile(path)
 			if err != nil {
 				errs.add(fmt.Errorf("failed to read file %s: %w", path, err))
