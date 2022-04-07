@@ -1,0 +1,15 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  creationTimestamp: "2022-04-07T01:07:55Z"
+  labels:
+    kubernetes.io/metadata.name: default
+  name: default
+  resourceVersion: "588"
+  uid: a60072ec-d71b-4177-93e2-51160da8c2ce
+spec:
+  finalizers:
+  - kubernetes
+status:
+  phase: Active

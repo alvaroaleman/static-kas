@@ -98,7 +98,7 @@ func Discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceLis
 				fileNameWithoutSuffix := strings.TrimSuffix(d.Name(), ".yaml")
 				// If we find a single object, the resource name is the name of the first parent folder that is not also the name
 				// of the object (pods are nested in a pods/$podname/$podname.yaml structure for some reason)
-				for i := len(pathElements) - 2; i > 0; i-- {
+				for i := len(pathElements) - 2; i >= 0; i-- {
 					if pathElements[i] != fileNameWithoutSuffix {
 						name = pathElements[i]
 						break
@@ -107,7 +107,12 @@ func Discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceLis
 				kind = u.GetKind()
 				groupVersion = u.GetAPIVersion()
 			}
-			namespaced := strings.Contains(path, "namespaces/")
+			namespaced := kind != "Namespace" && strings.Contains(path, "namespaces/")
+
+			if name == "" {
+				l.Error("Couldn't discover resource name for resource in path, ignoring", zap.String("path", path))
+				return
+			}
 
 			lock.Lock()
 			defer lock.Unlock()
