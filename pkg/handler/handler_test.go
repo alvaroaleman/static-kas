@@ -288,7 +288,7 @@ func TestServer(t *testing.T) {
 		{
 			// These are special because they are not in the dump
 			name: "Listing namespaces",
-			run:  verifyList(ctx, c, &corev1.NamespaceList{}, 5),
+			run:  verifyList(ctx, c, &corev1.NamespaceList{}, 6),
 		},
 		{
 			name: "List when objects are stored as distinct files",
