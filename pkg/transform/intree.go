@@ -1,7 +1,6 @@
 package transform
 
 import (
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -85,6 +84,13 @@ func (ph *printHandler) transformFunc(tableVersion string, fallback TransformFun
 	}
 }
 
+// printInternal prints using an imported table printer. Because the tableprinters act on the internal version, we have to:
+// * Convert into the internal version
+// * Call the printfunc using reflect (The printfuncs are given to us as a slice of type Any)
+// * Convert the object that is part of the row from the internal version to the external version and set the GVK along
+//   the way, because:
+//    * Kubectl will refuse the entire list if any of the object keys does not have GVK set
+//    * Kubectl infers the namespace in case of namespaced objects from the embedded object, so we can not just omit it
 func (ph *printHandler) printInternal(tableVersion string, o runtime.Object) (*metav1.Table, error) {
 	internalVersion, err := legacyscheme.Scheme.New(schema.GroupVersionKind{Group: o.GetObjectKind().GroupVersionKind().Group, Kind: o.GetObjectKind().GroupVersionKind().Kind, Version: runtime.APIVersionInternal})
 	if err != nil {
@@ -94,18 +100,7 @@ func (ph *printHandler) printInternal(tableVersion string, o runtime.Object) (*m
 	if !ok {
 		return nil, nil
 	}
-	externalVersion, err := legacyscheme.Scheme.New(o.GetObjectKind().GroupVersionKind())
-	if err != nil {
-		return nil, fmt.Errorf("failed ton get object from scheme for external version: %w", err)
-	}
-	raw, err := json.Marshal(o)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal: %w", err)
-	}
-	if err := json.Unmarshal(raw, externalVersion); err != nil {
-		return nil, fmt.Errorf("failed to marshal into external version %T: %w", externalVersion, err)
-	}
-	if err := legacyscheme.Scheme.Convert(externalVersion, internalVersion, nil); err != nil {
+	if err := legacyscheme.Scheme.Convert(o, internalVersion, nil); err != nil {
 		return nil, fmt.Errorf("failed to convert to internal version: %w", err)
 	}
 
@@ -127,7 +122,10 @@ func (ph *printHandler) printInternal(tableVersion string, o runtime.Object) (*m
 		// We have to convert the embedded object back to the external version
 		gvk := o.GetObjectKind().GroupVersionKind()
 		gvk.Kind = strings.TrimSuffix(gvk.Kind, "List")
-		externalVersion, _ := legacyscheme.Scheme.New(gvk)
+		externalVersion, err := legacyscheme.Scheme.New(gvk)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get an object")
+		}
 		if err := legacyscheme.Scheme.Convert(rows[idx].Object.Object, externalVersion, nil); err != nil {
 			return nil, fmt.Errorf("failed to convert embedded object to external version: %w", err)
 		}
