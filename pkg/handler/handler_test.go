@@ -296,11 +296,11 @@ func TestServer(t *testing.T) {
 		},
 		{
 			name: "List nodes table printing",
-			run:  verifyTablePrinting(ctx, "/api/v1/nodes", 1, 1),
+			run:  verifyTablePrinting(ctx, "/api/v1/nodes", 10, 1),
 		},
 		{
 			name: "Get node table printing",
-			run:  verifyTablePrinting(ctx, "/api/v1/nodes/ip-10-0-143-10.ec2.internal", 1, 1),
+			run:  verifyTablePrinting(ctx, "/api/v1/nodes/ip-10-0-143-10.ec2.internal", 10, 1),
 		},
 		{
 			name: "List pods table printing",

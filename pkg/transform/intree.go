@@ -1,419 +1,147 @@
 package transform
 
 import (
-	"bytes"
 	"fmt"
-	"strconv"
-	"time"
+	"reflect"
+	"strings"
 
-	appsv1 "k8s.io/api/apps/v1"
-	api "k8s.io/api/core/v1"
-	corev1 "k8s.io/api/core/v1"
+	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/duration"
-	utilpointer "k8s.io/utils/pointer"
-	"sigs.k8s.io/yaml"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/scheme"
+
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
+	"k8s.io/kubernetes/pkg/printers"
+	"k8s.io/kubernetes/pkg/printers/internalversion"
+
+	_ "k8s.io/kubernetes/pkg/apis/admission/install"
+	_ "k8s.io/kubernetes/pkg/apis/admissionregistration/install"
+	_ "k8s.io/kubernetes/pkg/apis/apps/install"
+	_ "k8s.io/kubernetes/pkg/apis/authentication/install"
+	_ "k8s.io/kubernetes/pkg/apis/authorization/install"
+	_ "k8s.io/kubernetes/pkg/apis/autoscaling/install"
+	_ "k8s.io/kubernetes/pkg/apis/batch/install"
+	_ "k8s.io/kubernetes/pkg/apis/certificates/install"
+	_ "k8s.io/kubernetes/pkg/apis/coordination/install"
+	_ "k8s.io/kubernetes/pkg/apis/events/install"
+	_ "k8s.io/kubernetes/pkg/apis/extensions/install"
+	_ "k8s.io/kubernetes/pkg/apis/flowcontrol/install"
+	_ "k8s.io/kubernetes/pkg/apis/networking/install"
+	_ "k8s.io/kubernetes/pkg/apis/node/install"
+	_ "k8s.io/kubernetes/pkg/apis/policy/install"
+	_ "k8s.io/kubernetes/pkg/apis/rbac/install"
+	_ "k8s.io/kubernetes/pkg/apis/scheduling/install"
+	_ "k8s.io/kubernetes/pkg/apis/storage/install"
 )
 
-func printPodList(podListRaw []byte) ([]metav1.TableRow, error) {
-	podList := corev1.PodList{}
-	if err := yaml.Unmarshal(podListRaw, &podList); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal into podlist: %w", err)
+func newInTreeHandler(l *zap.Logger) *printHandler {
+	ph := &printHandler{log: l}
+	internalversion.AddHandlers(ph)
+	return ph
+}
+
+type handlerEntry struct {
+	columnDefinitions []metav1.TableColumnDefinition
+	printFunc         reflect.Value
+}
+
+type printHandler struct {
+	handlers map[reflect.Type]handlerEntry
+	log      *zap.Logger
+}
+
+func (ph *printHandler) TableHandler(columns []metav1.TableColumnDefinition, printFunc interface{}) error {
+	if ph.handlers == nil {
+		ph.handlers = map[reflect.Type]handlerEntry{}
 	}
-	rows := make([]metav1.TableRow, 0, len(podList.Items))
-	for i := range podList.Items {
-		r, err := printPod(&podList.Items[i])
+	printFuncVal := reflect.ValueOf(printFunc)
+	printFuncType := printFuncVal.Type()
+
+	// Key the handlers by the type of the first argument of the printFunc
+	ph.handlers[printFuncType.In(0)] = handlerEntry{
+		columnDefinitions: columns,
+		printFunc:         printFuncVal,
+	}
+	return nil
+}
+
+func (ph *printHandler) transformFunc(tableVersion string, fallback TransformFunc) TransformFunc {
+	return func(o runtime.Object) (*metav1.Table, error) {
+		res, err := ph.printInternal(tableVersion, o)
 		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, r...)
-	}
-	return rows, nil
-}
-
-// This is passed throgh within the upstream code but there is no request option for this, so do the simple thing and always return it.
-var options = TablePrinterOptions{Wide: true}
-
-func printPodFromRaw(podRaw []byte) ([]metav1.TableRow, error) {
-	pod := corev1.Pod{}
-	if err := yaml.Unmarshal(podRaw, &pod); err != nil {
-		return nil, err
-	}
-	return printPod(&pod)
-}
-
-func printPod(pod *corev1.Pod) ([]metav1.TableRow, error) {
-	restarts := 0
-	totalContainers := len(pod.Spec.Containers)
-	readyContainers := 0
-	lastRestartDate := metav1.NewTime(time.Time{})
-
-	reason := string(pod.Status.Phase)
-	if pod.Status.Reason != "" {
-		reason = pod.Status.Reason
-	}
-
-	row := metav1.TableRow{
-		Object: runtime.RawExtension{Object: pod},
-	}
-
-	switch pod.Status.Phase {
-	case api.PodSucceeded:
-		row.Conditions = podSuccessConditions
-	case api.PodFailed:
-		row.Conditions = podFailedConditions
-	}
-
-	initializing := false
-	for i := range pod.Status.InitContainerStatuses {
-		container := pod.Status.InitContainerStatuses[i]
-		restarts += int(container.RestartCount)
-		if container.LastTerminationState.Terminated != nil {
-			terminatedDate := container.LastTerminationState.Terminated.FinishedAt
-			if lastRestartDate.Before(&terminatedDate) {
-				lastRestartDate = terminatedDate
+			if gvk := o.GetObjectKind().GroupVersionKind(); scheme.Scheme.Recognizes(gvk) {
+				ph.log.Warn("Internal conversion failed but kubernetes scheme recognizes gvk - missing imports?", zap.String("gvk", gvk.String()), zap.Error(err))
 			}
+			return fallback(o)
 		}
-		switch {
-		case container.State.Terminated != nil && container.State.Terminated.ExitCode == 0:
-			continue
-		case container.State.Terminated != nil:
-			// initialization is failed
-			if len(container.State.Terminated.Reason) == 0 {
-				if container.State.Terminated.Signal != 0 {
-					reason = fmt.Sprintf("Init:Signal:%d", container.State.Terminated.Signal)
-				} else {
-					reason = fmt.Sprintf("Init:ExitCode:%d", container.State.Terminated.ExitCode)
-				}
-			} else {
-				reason = "Init:" + container.State.Terminated.Reason
-			}
-			initializing = true
-		case container.State.Waiting != nil && len(container.State.Waiting.Reason) > 0 && container.State.Waiting.Reason != "PodInitializing":
-			reason = "Init:" + container.State.Waiting.Reason
-			initializing = true
-		default:
-			reason = fmt.Sprintf("Init:%d/%d", i, len(pod.Spec.InitContainers))
-			initializing = true
+
+		if res == nil {
+			return fallback(o)
 		}
-		break
+
+		return res, nil
 	}
-	if !initializing {
-		restarts = 0
-		hasRunning := false
-		for i := len(pod.Status.ContainerStatuses) - 1; i >= 0; i-- {
-			container := pod.Status.ContainerStatuses[i]
-
-			restarts += int(container.RestartCount)
-			if container.LastTerminationState.Terminated != nil {
-				terminatedDate := container.LastTerminationState.Terminated.FinishedAt
-				if lastRestartDate.Before(&terminatedDate) {
-					lastRestartDate = terminatedDate
-				}
-			}
-			if container.State.Waiting != nil && container.State.Waiting.Reason != "" {
-				reason = container.State.Waiting.Reason
-			} else if container.State.Terminated != nil && container.State.Terminated.Reason != "" {
-				reason = container.State.Terminated.Reason
-			} else if container.State.Terminated != nil && container.State.Terminated.Reason == "" {
-				if container.State.Terminated.Signal != 0 {
-					reason = fmt.Sprintf("Signal:%d", container.State.Terminated.Signal)
-				} else {
-					reason = fmt.Sprintf("ExitCode:%d", container.State.Terminated.ExitCode)
-				}
-			} else if container.Ready && container.State.Running != nil {
-				hasRunning = true
-				readyContainers++
-			}
-		}
-
-		// change pod status back to "Running" if there is at least one container still reporting as "Running" status
-		if reason == "Completed" && hasRunning {
-			if hasPodReadyCondition(pod.Status.Conditions) {
-				reason = "Running"
-			} else {
-				reason = "NotReady"
-			}
-		}
-	}
-
-	if pod.DeletionTimestamp != nil && pod.Status.Reason == "NodeLost" {
-		reason = "Unknown"
-	} else if pod.DeletionTimestamp != nil {
-		reason = "Terminating"
-	}
-
-	restartsStr := strconv.Itoa(restarts)
-	if !lastRestartDate.IsZero() {
-		restartsStr = fmt.Sprintf("%d (%s ago)", restarts, translateTimestampSince(lastRestartDate))
-	}
-
-	row.Cells = append(row.Cells, pod.Name, fmt.Sprintf("%d/%d", readyContainers, totalContainers), reason, restartsStr, translateTimestampSince(pod.CreationTimestamp))
-	if options.Wide {
-		nodeName := pod.Spec.NodeName
-		nominatedNodeName := pod.Status.NominatedNodeName
-		podIP := ""
-		if len(pod.Status.PodIPs) > 0 {
-			podIP = pod.Status.PodIPs[0].IP
-		}
-
-		if podIP == "" {
-			podIP = "<none>"
-		}
-		if nodeName == "" {
-			nodeName = "<none>"
-		}
-		if nominatedNodeName == "" {
-			nominatedNodeName = "<none>"
-		}
-
-		readinessGates := "<none>"
-		if len(pod.Spec.ReadinessGates) > 0 {
-			trueConditions := 0
-			for _, readinessGate := range pod.Spec.ReadinessGates {
-				conditionType := readinessGate.ConditionType
-				for _, condition := range pod.Status.Conditions {
-					if condition.Type == conditionType {
-						if condition.Status == api.ConditionTrue {
-							trueConditions++
-						}
-						break
-					}
-				}
-			}
-			readinessGates = fmt.Sprintf("%d/%d", trueConditions, len(pod.Spec.ReadinessGates))
-		}
-		row.Cells = append(row.Cells, podIP, nodeName, nominatedNodeName, readinessGates)
-	}
-
-	return []metav1.TableRow{row}, nil
 }
 
-var (
-	podSuccessConditions = []metav1.TableRowCondition{{Type: metav1.RowCompleted, Status: metav1.ConditionTrue, Reason: string(api.PodSucceeded), Message: "The pod has completed successfully."}}
-	podFailedConditions  = []metav1.TableRowCondition{{Type: metav1.RowCompleted, Status: metav1.ConditionTrue, Reason: string(api.PodFailed), Message: "The pod failed."}}
-)
-
-func hasPodReadyCondition(conditions []api.PodCondition) bool {
-	for _, condition := range conditions {
-		if condition.Type == api.PodReady && condition.Status == api.ConditionTrue {
-			return true
-		}
-	}
-	return false
-}
-
-// translateTimestampSince returns the elapsed time since timestamp in
-// human-readable approximation.
-func translateTimestampSince(timestamp metav1.Time) string {
-	if timestamp.IsZero() {
-		return "<unknown>"
-	}
-
-	return duration.HumanDuration(time.Since(timestamp.Time))
-}
-
-type TablePrinterOptions struct {
-	NoHeaders bool
-	Wide      bool
-}
-
-func printDeploymentFromRaw(raw []byte) ([]metav1.TableRow, error) {
-	var dep appsv1.Deployment
-	if err := yaml.Unmarshal(raw, &dep); err != nil {
-		return nil, err
-	}
-	return printDeployment(&dep)
-}
-
-func printDeployment(obj *appsv1.Deployment) ([]metav1.TableRow, error) {
-	row := metav1.TableRow{
-		Object: runtime.RawExtension{Object: obj},
-	}
-	desiredReplicas := utilpointer.Int32Deref(obj.Spec.Replicas, 0)
-	updatedReplicas := obj.Status.UpdatedReplicas
-	readyReplicas := obj.Status.ReadyReplicas
-	availableReplicas := obj.Status.AvailableReplicas
-	age := translateTimestampSince(obj.CreationTimestamp)
-	containers := obj.Spec.Template.Spec.Containers
-	selector, err := metav1.LabelSelectorAsSelector(obj.Spec.Selector)
-	selectorString := ""
+// printInternal prints using an imported table printer. Because the tableprinters act on the internal version, we have to:
+// * Convert into the internal version
+// * Call the printfunc using reflect (The printfuncs are given to us as a slice of type Any)
+// * Convert the object that is part of the row from the internal version to the external version and set the GVK along
+//   the way, because:
+//    * Kubectl will refuse the entire list if any of the object keys does not have GVK set
+//    * Kubectl infers the namespace in case of namespaced objects from the embedded object, so we can not just omit it
+func (ph *printHandler) printInternal(tableVersion string, o runtime.Object) (*metav1.Table, error) {
+	internalVersion, err := legacyscheme.Scheme.New(schema.GroupVersionKind{Group: o.GetObjectKind().GroupVersionKind().Group, Kind: o.GetObjectKind().GroupVersionKind().Kind, Version: runtime.APIVersionInternal})
 	if err != nil {
-		selectorString = "<invalid>"
-	} else {
-		selectorString = selector.String()
+		return nil, fmt.Errorf("failed to get object from scheme for internal version: %w", err)
 	}
-	row.Cells = append(row.Cells, obj.Name, fmt.Sprintf("%d/%d", int64(readyReplicas), int64(desiredReplicas)), int64(updatedReplicas), int64(availableReplicas), age)
-	if options.Wide {
-		containers, images := layoutContainerCells(containers)
-		row.Cells = append(row.Cells, containers, images, selectorString)
+	handler, ok := ph.handlers[reflect.TypeOf(internalVersion)]
+	if !ok {
+		return nil, nil
 	}
-	return []metav1.TableRow{row}, nil
-}
+	if err := legacyscheme.Scheme.Convert(o, internalVersion, nil); err != nil {
+		return nil, fmt.Errorf("failed to convert to internal version: %w", err)
+	}
 
-func printDeploymentList(listRaw []byte) ([]metav1.TableRow, error) {
-	var list appsv1.DeploymentList
-	if err := yaml.Unmarshal(listRaw, &list); err != nil {
-		return nil, err
+	generateOpts := printers.GenerateOptions{Wide: true}
+	result := handler.printFunc.Call([]reflect.Value{
+		reflect.ValueOf(internalVersion),
+		reflect.ValueOf(generateOpts),
+	})
+	rowsVal, errVal := result[0], result[1]
+	if v := errVal.Interface(); v != nil {
+		err := v.(error)
+		return nil, fmt.Errorf("printFunc failed: %w", err)
 	}
-	rows := make([]metav1.TableRow, 0, len(list.Items))
-	for i := range list.Items {
-		r, err := printDeployment(&list.Items[i])
+	rows, ok := rowsVal.Interface().([]metav1.TableRow)
+	if !ok {
+		return nil, fmt.Errorf("printfunc didn't return tablerows, but %T", rowsVal.Interface())
+	}
+	for idx := range rows {
+		// We have to convert the embedded object back to the external version
+		gvk := o.GetObjectKind().GroupVersionKind()
+		gvk.Kind = strings.TrimSuffix(gvk.Kind, "List")
+		externalVersion, err := legacyscheme.Scheme.New(gvk)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to get an object from scheme for %s: %w", gvk, err)
 		}
-		rows = append(rows, r...)
-	}
-	return rows, nil
-}
-
-// Lay out all the containers on one line if use wide output.
-func layoutContainerCells(containers []api.Container) (names string, images string) {
-	var namesBuffer bytes.Buffer
-	var imagesBuffer bytes.Buffer
-
-	for i, container := range containers {
-		namesBuffer.WriteString(container.Name)
-		imagesBuffer.WriteString(container.Image)
-		if i != len(containers)-1 {
-			namesBuffer.WriteString(",")
-			imagesBuffer.WriteString(",")
+		if err := legacyscheme.Scheme.Convert(rows[idx].Object.Object, externalVersion, nil); err != nil {
+			return nil, fmt.Errorf("failed to convert embedded object to external version: %w", err)
 		}
+		externalVersion.(gvkSetter).SetGroupVersionKind(gvk)
+		rows[idx].Object = runtime.RawExtension{Object: externalVersion}
 	}
-	return namesBuffer.String(), imagesBuffer.String()
+	return &metav1.Table{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "meta.k8s.io/" + tableVersion,
+			Kind:       "Table",
+		},
+		ColumnDefinitions: handler.columnDefinitions,
+		Rows:              rows,
+	}, nil
 }
 
-func printStatefulSetFromRaw(raw []byte) ([]metav1.TableRow, error) {
-	var sst appsv1.StatefulSet
-	if err := yaml.Unmarshal(raw, &sst); err != nil {
-		return nil, err
-	}
-	return printStatefulSet(&sst)
-}
-
-func printStatefulSet(obj *appsv1.StatefulSet) ([]metav1.TableRow, error) {
-	row := metav1.TableRow{
-		Object: runtime.RawExtension{Object: obj},
-	}
-	desiredReplicas := utilpointer.Int32Deref(obj.Spec.Replicas, 0)
-	readyReplicas := obj.Status.ReadyReplicas
-	createTime := translateTimestampSince(obj.CreationTimestamp)
-	row.Cells = append(row.Cells, obj.Name, fmt.Sprintf("%d/%d", int64(readyReplicas), int64(desiredReplicas)), createTime)
-	if options.Wide {
-		names, images := layoutContainerCells(obj.Spec.Template.Spec.Containers)
-		row.Cells = append(row.Cells, names, images)
-	}
-	return []metav1.TableRow{row}, nil
-}
-
-func printStatefulSetList(listRaw []byte) ([]metav1.TableRow, error) {
-	list := appsv1.StatefulSetList{}
-	if err := yaml.Unmarshal(listRaw, &list); err != nil {
-		return nil, err
-	}
-	rows := make([]metav1.TableRow, 0, len(list.Items))
-	for i := range list.Items {
-		r, err := printStatefulSet(&list.Items[i])
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, r...)
-	}
-	return rows, nil
-}
-
-func printDaemonSetFromRaw(raw []byte) ([]metav1.TableRow, error) {
-	ds := appsv1.DaemonSet{}
-	if err := yaml.Unmarshal(raw, &ds); err != nil {
-		return nil, err
-	}
-	return printDaemonSet(&ds)
-}
-
-func printDaemonSet(obj *appsv1.DaemonSet) ([]metav1.TableRow, error) {
-	row := metav1.TableRow{
-		Object: runtime.RawExtension{Object: obj},
-	}
-
-	desiredScheduled := obj.Status.DesiredNumberScheduled
-	currentScheduled := obj.Status.CurrentNumberScheduled
-	numberReady := obj.Status.NumberReady
-	numberUpdated := obj.Status.UpdatedNumberScheduled
-	numberAvailable := obj.Status.NumberAvailable
-
-	row.Cells = append(row.Cells, obj.Name, int64(desiredScheduled), int64(currentScheduled), int64(numberReady), int64(numberUpdated), int64(numberAvailable), labels.FormatLabels(obj.Spec.Template.Spec.NodeSelector), translateTimestampSince(obj.CreationTimestamp))
-	if options.Wide {
-		names, images := layoutContainerCells(obj.Spec.Template.Spec.Containers)
-		row.Cells = append(row.Cells, names, images, metav1.FormatLabelSelector(obj.Spec.Selector))
-	}
-	return []metav1.TableRow{row}, nil
-}
-
-func printDaemonSetListFromRaw(raw []byte) ([]metav1.TableRow, error) {
-	list := appsv1.DaemonSetList{}
-	if err := yaml.Unmarshal(raw, &list); err != nil {
-		return nil, err
-	}
-	return printDaemonSetList(&list)
-}
-
-func printDaemonSetList(list *appsv1.DaemonSetList) ([]metav1.TableRow, error) {
-	rows := make([]metav1.TableRow, 0, len(list.Items))
-	for i := range list.Items {
-		r, err := printDaemonSet(&list.Items[i])
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, r...)
-	}
-	return rows, nil
-}
-
-func printReplicaSetFromRaw(raw []byte) ([]metav1.TableRow, error) {
-	rs := appsv1.ReplicaSet{}
-	if err := yaml.Unmarshal(raw, &rs); err != nil {
-		return nil, err
-	}
-	return printReplicaSet(&rs)
-
-}
-
-func printReplicaSetListFromRaw(raw []byte) ([]metav1.TableRow, error) {
-	list := appsv1.ReplicaSetList{}
-	if err := yaml.Unmarshal(raw, &list); err != nil {
-		return nil, err
-	}
-	return printReplicaSetList(&list)
-
-}
-
-func printReplicaSet(obj *appsv1.ReplicaSet) ([]metav1.TableRow, error) {
-	row := metav1.TableRow{
-		Object: runtime.RawExtension{Object: obj},
-	}
-
-	desiredReplicas := *obj.Spec.Replicas
-	currentReplicas := obj.Status.Replicas
-	readyReplicas := obj.Status.ReadyReplicas
-
-	row.Cells = append(row.Cells, obj.Name, int64(desiredReplicas), int64(currentReplicas), int64(readyReplicas), translateTimestampSince(obj.CreationTimestamp))
-	if options.Wide {
-		names, images := layoutContainerCells(obj.Spec.Template.Spec.Containers)
-		row.Cells = append(row.Cells, names, images, metav1.FormatLabelSelector(obj.Spec.Selector))
-	}
-	return []metav1.TableRow{row}, nil
-}
-
-func printReplicaSetList(list *appsv1.ReplicaSetList) ([]metav1.TableRow, error) {
-	rows := make([]metav1.TableRow, 0, len(list.Items))
-	for i := range list.Items {
-		r, err := printReplicaSet(&list.Items[i])
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, r...)
-	}
-	return rows, nil
+type gvkSetter interface {
+	SetGroupVersionKind(gvk schema.GroupVersionKind)
 }
