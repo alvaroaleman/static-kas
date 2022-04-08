@@ -124,7 +124,7 @@ func (ph *printHandler) printInternal(tableVersion string, o runtime.Object) (*m
 		gvk.Kind = strings.TrimSuffix(gvk.Kind, "List")
 		externalVersion, err := legacyscheme.Scheme.New(gvk)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get an object")
+			return nil, fmt.Errorf("failed to get an object from scheme for %s: %w", gvk, err)
 		}
 		if err := legacyscheme.Scheme.Convert(rows[idx].Object.Object, externalVersion, nil); err != nil {
 			return nil, fmt.Errorf("failed to convert embedded object to external version: %w", err)
