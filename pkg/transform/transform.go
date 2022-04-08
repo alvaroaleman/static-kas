@@ -50,11 +50,8 @@ func transform(header []metav1.TableColumnDefinition, body func([]byte) ([]metav
 	}
 }
 
-func NewTableTransformMap(log *zap.Logger, crds map[string]*apiextensionsv1.CustomResourceDefinition) (func(TransformEntryKey, string) TransformFunc, error) {
-	inTreeHandler, err := newInTreeHandler(log)
-	if err != nil {
-		return nil, fmt.Errorf("failed to construct in-tree handler: %w", err)
-	}
+func NewTableTransformMap(log *zap.Logger, crds map[string]*apiextensionsv1.CustomResourceDefinition) func(TransformEntryKey, string) TransformFunc {
+	inTreeHandler := newInTreeHandler(log)
 	return func(key TransformEntryKey, tableVersion string) TransformFunc {
 		crdHandler := func(r runtime.Object) (*metav1.Table, error) {
 			// TODO: Should we cache these?
@@ -78,7 +75,7 @@ func NewTableTransformMap(log *zap.Logger, crds map[string]*apiextensionsv1.Cust
 		}
 
 		return inTreeHandler.transformFunc(tableVersion, crdHandler)
-	}, nil
+	}
 }
 
 func additionalPrinterColumsForCRD(key TransformEntryKey, crds map[string]*apiextensionsv1.CustomResourceDefinition) []apiextensionsv1.CustomResourceColumnDefinition {

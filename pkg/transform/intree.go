@@ -11,22 +11,35 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
-	internalv1 "k8s.io/kubernetes/pkg/apis/core"
-	internalv1conversions "k8s.io/kubernetes/pkg/apis/core/v1"
+
+	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	"k8s.io/kubernetes/pkg/printers"
 	"k8s.io/kubernetes/pkg/printers/internalversion"
+
+	_ "k8s.io/kubernetes/pkg/apis/admission/install"
+	_ "k8s.io/kubernetes/pkg/apis/admissionregistration/install"
+	_ "k8s.io/kubernetes/pkg/apis/apps/install"
+	_ "k8s.io/kubernetes/pkg/apis/authentication/install"
+	_ "k8s.io/kubernetes/pkg/apis/authorization/install"
+	_ "k8s.io/kubernetes/pkg/apis/autoscaling/install"
+	_ "k8s.io/kubernetes/pkg/apis/batch/install"
+	_ "k8s.io/kubernetes/pkg/apis/certificates/install"
+	_ "k8s.io/kubernetes/pkg/apis/coordination/install"
+	_ "k8s.io/kubernetes/pkg/apis/events/install"
+	_ "k8s.io/kubernetes/pkg/apis/extensions/install"
+	_ "k8s.io/kubernetes/pkg/apis/flowcontrol/install"
+	_ "k8s.io/kubernetes/pkg/apis/networking/install"
+	_ "k8s.io/kubernetes/pkg/apis/node/install"
+	_ "k8s.io/kubernetes/pkg/apis/policy/install"
+	_ "k8s.io/kubernetes/pkg/apis/rbac/install"
+	_ "k8s.io/kubernetes/pkg/apis/scheduling/install"
+	_ "k8s.io/kubernetes/pkg/apis/storage/install"
 )
 
-func newInTreeHandler(l *zap.Logger) (*printHandler, error) {
-	if err := internalv1conversions.AddToScheme(scheme.Scheme); err != nil {
-		return nil, fmt.Errorf("failed to add conversions for internal corev1 to scheme: %w", err)
-	}
-	if err := internalv1.AddToScheme(scheme.Scheme); err != nil {
-		return nil, fmt.Errorf("failed to add internal corev1 to scheme: %w", err)
-	}
+func newInTreeHandler(l *zap.Logger) *printHandler {
 	ph := &printHandler{log: l}
 	internalversion.AddHandlers(ph)
-	return ph, nil
+	return ph
 }
 
 type handlerEntry struct {
@@ -69,7 +82,7 @@ func (ph *printHandler) transformFunc(tableVersion string, fallback TransformFun
 }
 
 func (ph *printHandler) printInternal(tableVersion string, o runtime.Object) (*metav1.Table, error) {
-	internalVersion, err := scheme.Scheme.New(schema.GroupVersionKind{Group: o.GetObjectKind().GroupVersionKind().Group, Kind: o.GetObjectKind().GroupVersionKind().Kind, Version: runtime.APIVersionInternal})
+	internalVersion, err := legacyscheme.Scheme.New(schema.GroupVersionKind{Group: o.GetObjectKind().GroupVersionKind().Group, Kind: o.GetObjectKind().GroupVersionKind().Kind, Version: runtime.APIVersionInternal})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get object from scheme for internal version: %w", err)
 	}
@@ -77,7 +90,7 @@ func (ph *printHandler) printInternal(tableVersion string, o runtime.Object) (*m
 	if !ok {
 		return nil, nil
 	}
-	externalVersion, err := scheme.Scheme.New(o.GetObjectKind().GroupVersionKind())
+	externalVersion, err := legacyscheme.Scheme.New(o.GetObjectKind().GroupVersionKind())
 	if err != nil {
 		return nil, fmt.Errorf("failed ton get object from scheme for external version: %w", err)
 	}
@@ -88,7 +101,7 @@ func (ph *printHandler) printInternal(tableVersion string, o runtime.Object) (*m
 	if err := json.Unmarshal(raw, externalVersion); err != nil {
 		return nil, fmt.Errorf("failed to marshal into external version %T: %w", externalVersion, err)
 	}
-	if err := scheme.Scheme.Convert(externalVersion, internalVersion, nil); err != nil {
+	if err := legacyscheme.Scheme.Convert(externalVersion, internalVersion, nil); err != nil {
 		return nil, fmt.Errorf("failed to convert to internal version: %w", err)
 	}
 
@@ -110,8 +123,8 @@ func (ph *printHandler) printInternal(tableVersion string, o runtime.Object) (*m
 		// We have to convert the embedded object back to the external version
 		gvk := o.GetObjectKind().GroupVersionKind()
 		gvk.Kind = strings.TrimSuffix(gvk.Kind, "List")
-		externalVersion, _ := scheme.Scheme.New(gvk)
-		if err := scheme.Scheme.Convert(rows[idx].Object.Object, externalVersion, nil); err != nil {
+		externalVersion, _ := legacyscheme.Scheme.New(gvk)
+		if err := legacyscheme.Scheme.Convert(rows[idx].Object.Object, externalVersion, nil); err != nil {
 			return nil, fmt.Errorf("failed to convert embedded object to external version: %w", err)
 		}
 		externalVersion.(gvkSetter).SetGroupVersionKind(gvk)

@@ -62,10 +62,7 @@ func New(l *zap.Logger, baseDir string) (*mux.Router, error) {
 	}
 	l.Info("Finished discovering api resources")
 
-	tableTransform, err := transform.NewTableTransformMap(l, crdMap)
-	if err != nil {
-		return nil, fmt.Errorf("failed to construct table transform: %w", err)
-	}
+	tableTransform := transform.NewTableTransformMap(l, crdMap)
 
 	router := mux.NewRouter()
 	router.Use(loggingMiddleware(l))
