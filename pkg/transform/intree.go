@@ -77,6 +77,10 @@ func (ph *printHandler) transformFunc(tableVersion string, fallback TransformFun
 			return fallback(o)
 		}
 
+		if res == nil {
+			return fallback(o)
+		}
+
 		return res, nil
 	}
 }
