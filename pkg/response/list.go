@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -66,6 +67,10 @@ func (l *listResponse) run() error {
 			return err
 		}
 	}
+
+	sort.Slice(list.Items, func(a, b int) bool {
+		return !list.Items[a].GetCreationTimestamp().After(list.Items[b].GetCreationTimestamp().Time)
+	})
 
 	if isWatch(l.r) {
 		return respondToWatch(l.r, l.w, unstructuredListItemsToRuntimeObjects(list)...)
