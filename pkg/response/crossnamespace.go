@@ -60,6 +60,9 @@ func readAndDeserializeForAllNamespaces(parentDir, group, resource string) (*uns
 	result.SetAPIVersion("v1")
 	result.SetKind("List")
 	for _, namespace := range namespaces {
+		if !namespace.IsDir() {
+			continue
+		}
 		fromNamespace, err := ReadAndDeserializeList(path.Join(parentDir, namespace.Name(), group), resource)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read from namespace %s: %w", namespace.Name(), err)
