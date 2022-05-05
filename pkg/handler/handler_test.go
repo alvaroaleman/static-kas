@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"testing"
 	"time"
 
@@ -487,6 +488,21 @@ func TestServer(t *testing.T) {
 					o.TailLines = utilpointer.Int64(1)
 				},
 			),
+		},
+		{
+			name: "List response is sorted",
+			run: func(t *testing.T) {
+				podList := &corev1.PodList{}
+				if err := c.List(ctx, podList); err != nil {
+					t.Fatalf("failed to list pods: %v", err)
+				}
+				isSorted := sort.SliceIsSorted(podList.Items, func(a, b int) bool {
+					return podList.Items[a].CreationTimestamp.Before(&podList.Items[b].CreationTimestamp)
+				})
+				if !isSorted {
+					t.Error("resulting pod list is not sorted by creationTimestamp")
+				}
+			},
 		},
 	}
 
