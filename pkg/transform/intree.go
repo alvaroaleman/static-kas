@@ -88,14 +88,14 @@ func (ph *printHandler) transformFunc(tableVersion string, fallback TransformFun
 	return func(o runtime.Object) (*metav1.Table, error) {
 		res, err := ph.printInternal(tableVersion, o)
 		if err != nil {
-			if gvk := o.GetObjectKind().GroupVersionKind(); scheme.Scheme.Recognizes(gvk) {
-				ph.log.Warn("Internal conversion failed but kubernetes scheme recognizes gvk - missing imports?", zap.String("gvk", gvk.String()), zap.Error(err))
-			}
 			ph.log.Error("Internal printer errored", zap.Error(err))
 			return fallback(o)
 		}
 
 		if res == nil {
+			if gvk := o.GetObjectKind().GroupVersionKind(); scheme.Scheme.Recognizes(gvk) {
+				ph.log.Warn("No in-tree tableprinter but kubernetes scheme recognizes gvk - missing imports?", zap.String("gvk", gvk.String()), zap.Error(err))
+			}
 			return fallback(o)
 		}
 
@@ -113,7 +113,7 @@ func (ph *printHandler) transformFunc(tableVersion string, fallback TransformFun
 func (ph *printHandler) printInternal(tableVersion string, o runtime.Object) (*metav1.Table, error) {
 	internalVersion, err := legacyscheme.Scheme.New(schema.GroupVersionKind{Group: o.GetObjectKind().GroupVersionKind().Group, Kind: o.GetObjectKind().GroupVersionKind().Kind, Version: runtime.APIVersionInternal})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get object from scheme for internal version: %w", err)
+		return nil, nil
 	}
 	handler, ok := ph.handlers[reflect.TypeOf(internalVersion)]
 	if !ok {

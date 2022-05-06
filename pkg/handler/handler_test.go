@@ -357,11 +357,11 @@ func TestServer(t *testing.T) {
 		},
 		{
 			name: "List for CRD without CRD manifest returns valid table",
-			run:  verifyTablePrinting(ctx, "/apis/network.openshift.io/v1/clusternetworks", 1, 1),
+			run:  verifyTablePrinting(ctx, "/apis/network.openshift.io/v1/clusternetworks", 2, 1),
 		},
 		{
 			name: "Get for CRD without CRD manifest returns valid table",
-			run:  verifyTablePrinting(ctx, "/apis/network.openshift.io/v1/clusternetworks/default", 1, 1),
+			run:  verifyTablePrinting(ctx, "/apis/network.openshift.io/v1/clusternetworks/default", 2, 1),
 		},
 		{
 			name: "List apiservice tableprinting",
@@ -370,6 +370,14 @@ func TestServer(t *testing.T) {
 		{
 			name: "Get apiservice tableprinting",
 			run:  verifyTablePrinting(ctx, "/apis/apiregistration.k8s.io/v1/apiservices/v1.apps.openshift.io", 4, 1),
+		},
+		{
+			name: "List for CRDs falls back to default printer",
+			run:  verifyTablePrinting(ctx, "/apis/apiextensions.k8s.io/v1/customresourcedefinitions", 2, 1),
+		},
+		{
+			name: "Get for CRDs falls back to default printer",
+			run:  verifyTablePrinting(ctx, "/apis/apiextensions.k8s.io/v1/customresourcedefinitions/clusteroperators.config.openshift.io", 2, 1),
 		},
 		{
 			name: "List services (Cilium sysdump list format)",
