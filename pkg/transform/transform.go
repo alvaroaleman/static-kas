@@ -10,6 +10,8 @@ import (
 	"k8s.io/apiextensions-apiserver/pkg/registry/customresource/tableconvertor"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	registryrest "k8s.io/apiserver/pkg/registry/rest"
 )
 
 type TransformEntryKey struct {
@@ -52,15 +54,23 @@ func transform(header []metav1.TableColumnDefinition, body func([]byte) ([]metav
 
 func NewTableTransformMap(log *zap.Logger, crds map[string]*apiextensionsv1.CustomResourceDefinition) func(TransformEntryKey, string) TransformFunc {
 	inTreeHandler := newInTreeHandler(log)
+	defaultConvertor := registryrest.NewDefaultTableConvertor(schema.GroupResource{})
 	return func(key TransformEntryKey, tableVersion string) TransformFunc {
-		crdHandler := func(r runtime.Object) (*metav1.Table, error) {
-			// TODO: Should we cache these?
-			converter, err := tableconvertor.New(additionalPrinterColumsForCRD(key, crds))
-			if err != nil {
-				return nil, fmt.Errorf("failed to construct tableconvertor: %w", err)
-			}
+		fallBackHandler := func(r runtime.Object) (*metav1.Table, error) {
+			var convertor func(ctx context.Context, object runtime.Object, tableOptions runtime.Object) (*metav1.Table, error)
 
-			table, err := converter.ConvertToTable(context.Background(), r, &metav1.TableOptions{})
+			additionalPrinterColums := additionalPrinterColumsForCRD(key, crds)
+			if len(additionalPrinterColums) == 0 {
+				convertor = defaultConvertor.ConvertToTable
+			} else {
+				// TODO: Should we cache these?
+				converter, err := tableconvertor.New(additionalPrinterColums)
+				if err != nil {
+					return nil, fmt.Errorf("failed to construct tableconvertor: %w", err)
+				}
+				convertor = converter.ConvertToTable
+			}
+			table, err := convertor(context.Background(), r, &metav1.TableOptions{})
 			if err != nil {
 				return nil, err
 			}
@@ -74,7 +84,7 @@ func NewTableTransformMap(log *zap.Logger, crds map[string]*apiextensionsv1.Cust
 			return table, nil
 		}
 
-		return inTreeHandler.transformFunc(tableVersion, crdHandler)
+		return inTreeHandler.transformFunc(tableVersion, fallBackHandler)
 	}
 }
 
