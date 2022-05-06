@@ -364,6 +364,14 @@ func TestServer(t *testing.T) {
 			run:  verifyTablePrinting(ctx, "/apis/network.openshift.io/v1/clusternetworks/default", 1, 1),
 		},
 		{
+			name: "List apiservice tableprinting",
+			run:  verifyTablePrinting(ctx, "/apis/apiregistration.k8s.io/v1/apiservices", 4, 1),
+		},
+		{
+			name: "Get apiservice tableprinting",
+			run:  verifyTablePrinting(ctx, "/apis/apiregistration.k8s.io/v1/apiservices/v1.apps.openshift.io", 4, 1),
+		},
+		{
 			name: "List services (Cilium sysdump list format)",
 			run:  verifyList(ctx, c, &corev1.ServiceList{}, 2),
 		},
