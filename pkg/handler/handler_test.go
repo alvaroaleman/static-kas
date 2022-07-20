@@ -36,7 +36,7 @@ func init() {
 }
 
 func TestServer(t *testing.T) {
-	handler, err := handler.New(zaptest.NewLogger(t), "./testdata")
+	handler, err := handler.New(zaptest.NewLogger(t), "./testdata", "8080")
 	if err != nil {
 		t.Fatalf("failed to construct server: %v", err)
 	}
@@ -51,8 +51,13 @@ func TestServer(t *testing.T) {
 	})
 	go func() {
 		defer close(serverDone)
-		server.ListenAndServe()
-		cancel()
+		defer cancel()
+
+		if err := server.ListenAndServe(); err != nil {
+			if err != http.ErrServerClosed {
+				t.Errorf("Failed to start test server: %v", err)
+			}
+		}
 	}()
 
 	startTimer := time.NewTicker(5 * time.Second)
@@ -62,6 +67,8 @@ func TestServer(t *testing.T) {
 		select {
 		case <-startTimer.C:
 			t.Fatal("timed out waiting for server to be up")
+		case <-ctx.Done():
+			return
 		default:
 			resp, err := http.Get("http://127.0.0.1:8080/version")
 			if err != nil {
@@ -191,7 +198,7 @@ func TestServer(t *testing.T) {
 		},
 		{
 			name: "List namespaced core object from all namespaces",
-			run:  verifyList(ctx, c, &corev1.PodList{}, 2),
+			run:  verifyList(ctx, c, &corev1.PodList{}, 3),
 		},
 		{
 			name: "List namespaced core object from all namespaces with label selector matching one",
@@ -289,7 +296,7 @@ func TestServer(t *testing.T) {
 		{
 			// These are special because they are not in the dump
 			name: "Listing namespaces",
-			run:  verifyList(ctx, c, &corev1.NamespaceList{}, 6),
+			run:  verifyList(ctx, c, &corev1.NamespaceList{}, 7),
 		},
 		{
 			name: "List when objects are stored as distinct files",
@@ -305,7 +312,7 @@ func TestServer(t *testing.T) {
 		},
 		{
 			name: "List pods table printing",
-			run:  verifyTablePrinting(ctx, "/api/v1/pods", 9, 2),
+			run:  verifyTablePrinting(ctx, "/api/v1/pods", 9, 3),
 		},
 		{
 			name: "Get pod table printing",
@@ -391,6 +398,26 @@ func TestServer(t *testing.T) {
 				"network-operator-7887564c4-mjg9d",
 				"Current first line\nCurrent second line\n",
 				func(o *corev1.PodLogOptions) { o.Container = "network-operator" },
+			),
+		},
+		{
+			name: "Get pod logs no container query param, 1 container pod",
+			run: verifyGetLogsNoContainer(ctx,
+				cfg.Host,
+				"openshift-network-operator",
+				"network-operator-7887564c4-mjg9d",
+				"Current first line\nCurrent second line\n",
+				http.StatusOK,
+			),
+		},
+		{
+			name: "Get pod logs no container query param, 2 container pod",
+			run: verifyGetLogsNoContainer(ctx,
+				cfg.Host,
+				"openshift-network2-operator",
+				"network-operator2-7887564c4-mjg9d",
+				"a container name must be specified for pod network-operator2-7887564c4-mjg9d, choose one of: [container1 container2]",
+				http.StatusBadRequest,
 			),
 		},
 		{
@@ -577,7 +604,11 @@ func verifyTablePrinting(ctx context.Context, path string, expectNumColumns int,
 					t.Errorf("expected %d columns, got %d", expectNumColumns, n)
 				}
 				if n := len(table.Rows); n != expectNumRows {
-					t.Errorf("expected to get %d rows back, got %d", expectNumRows, n)
+					t.Errorf("expected to get %d rows back, got %d:", expectNumRows, n)
+					for _, row := range table.Rows {
+						firstCell := row.Cells[0].(string)
+						t.Errorf(firstCell)
+					}
 				}
 				if expected := "meta.k8s.io/" + version; table.APIVersion != expected {
 					t.Errorf("expected to get table back in requested version %s, got %s", expected, table.APIVersion)
@@ -626,6 +657,29 @@ func verifyGetLogs(ctx context.Context, c corev1client.CoreV1Interface, namespac
 		}
 		if actual := string(logs); actual != expectedLog {
 			t.Errorf("expected to get %q as log, got %q", expectedLog, actual)
+		}
+	}
+}
+
+func verifyGetLogsNoContainer(ctx context.Context, apiURL, namespace, podName string, expectedResponseBody string, expectedStatusCode int) func(*testing.T) {
+	return func(t *testing.T) {
+		resp, err := http.Get(fmt.Sprintf("%s/api/v1/namespaces/%s/pods/%s/log", apiURL, namespace, podName))
+		if err != nil {
+			t.Fatalf("failed to get logs: %v", err)
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("failed to read response body: %v", err)
+		}
+
+		if resp.StatusCode != expectedStatusCode {
+			t.Errorf("expected to get code %d, got %d: %s", expectedStatusCode, resp.StatusCode, string(body))
+		}
+
+		if expectedResponseBody != string(body) {
+			t.Errorf("expected to get response body %q, got %q", expectedResponseBody, body)
 		}
 	}
 }
