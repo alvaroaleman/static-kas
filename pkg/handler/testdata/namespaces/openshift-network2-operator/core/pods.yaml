@@ -1,0 +1,85 @@
+---
+apiVersion: v1
+items:
+- apiVersion: v1
+  kind: Pod
+  metadata:
+    creationTimestamp: "2022-03-04T18:04:45Z"
+    generateName: network-operator2-7887564c4-
+    labels:
+      name: network-operator2
+      pod-template-hash: 7887564c4
+    name: network-operator2-7887564c4-mjg9d
+    namespace: openshift-network2-operator
+    ownerReferences:
+    - apiVersion: apps/v1
+      blockOwnerDeletion: true
+      controller: true
+      kind: ReplicaSet
+      name: network-operator-7887564c4
+      uid: 19c3c4c8-939e-408f-948c-f6bfbd779bca
+    resourceVersion: "4233"
+    uid: 39dc70fa-1a47-4d3a-b1dd-53c3b2a006b9
+  spec:
+    containers:
+    - command:
+      - /bin/command1
+      image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:1d57d0ddce50f786694e3651a814eb910ed289daa2747870d71abb2525495538
+      imagePullPolicy: IfNotPresent
+      name: container1
+    - command:
+      - /bin/command2
+      image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:1d57d0ddce50f786694e3651a814eb910ed289daa2747870d71abb2525495538
+      imagePullPolicy: IfNotPresent
+      name: container2
+  status:
+    conditions:
+    - lastProbeTime: null
+      lastTransitionTime: "2022-03-04T18:06:16Z"
+      status: "True"
+      type: Initialized
+    - lastProbeTime: null
+      lastTransitionTime: "2022-03-04T18:06:21Z"
+      status: "True"
+      type: Ready
+    - lastProbeTime: null
+      lastTransitionTime: "2022-03-04T18:06:21Z"
+      status: "True"
+      type: ContainersReady
+    - lastProbeTime: null
+      lastTransitionTime: "2022-03-04T18:06:16Z"
+      status: "True"
+      type: PodScheduled
+    containerStatuses:
+    - containerID: cri-o://b21f2abe35711b8da4ebe9e28366f08c78e06f4d573560dc2d7a2da35dd56dca
+      image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:1d57d0ddce50f786694e3651a814eb910ed289daa2747870d71abb2525495538
+      imageID: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:1d57d0ddce50f786694e3651a814eb910ed289daa2747870d71abb2525495538
+      lastState: {}
+      name: container1
+      ready: true
+      restartCount: 0
+      started: true
+      state:
+        running:
+          startedAt: "2022-03-04T18:06:20Z"
+    - containerID: cri-o://b21f2abe35711b8da4ebe9e28366f08c78e06f4d573560dc2d7a2da35dd56dca
+      image: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:1d57d0ddce50f786694e3651a814eb910ed289daa2747870d71abb2525495538
+      imageID: quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:1d57d0ddce50f786694e3651a814eb910ed289daa2747870d71abb2525495538
+      lastState: {}
+      name: container2
+      ready: true
+      restartCount: 0
+      started: true
+      state:
+        running:
+          startedAt: "2022-03-04T18:06:20Z"
+    hostIP: 10.0.133.157
+    phase: Running
+    podIP: 10.0.133.157
+    podIPs:
+    - ip: 10.0.133.157
+    qosClass: Burstable
+    startTime: "2022-03-04T18:06:16Z"
+kind: PodList
+metadata:
+  resourceVersion: "188150"

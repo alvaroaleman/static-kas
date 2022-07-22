@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -18,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	authorizationv1 "k8s.io/api/authorization/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -27,7 +29,7 @@ import (
 	"github.com/alvaroaleman/static-kas/pkg/transform"
 )
 
-func New(l *zap.Logger, baseDir string) (*mux.Router, error) {
+func New(l *zap.Logger, baseDir string, port string) (*mux.Router, error) {
 	l.Info("Discovering api resources")
 	groupResourceListMap, groupResourceMap, crdMap, err := discovery.Discover(l, baseDir)
 	if err != nil {
@@ -113,6 +115,25 @@ func New(l *zap.Logger, baseDir string) (*mux.Router, error) {
 	router.HandleFunc("/api/v1/namespaces/{namespace}/pods/{name}/log", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		containerName := r.URL.Query().Get("container")
+
+		if containerName == "" {
+			// User may omit the container name only when the pod has a single container
+			var code int
+			containerName, code, err = getSingleContainerPodContainerName(
+				fmt.Sprintf("http://localhost:%s", port), vars["namespace"], vars["name"])
+			if err != nil {
+				w.WriteHeader(code)
+
+				if code == http.StatusBadRequest {
+					w.Write([]byte(err.Error()))
+				} else {
+					w.Write([]byte(fmt.Sprintf("failed to get single container of pod %s in the %s namespace: %v",
+						vars["name"], vars["namespace"], err)))
+				}
+				return
+			}
+		}
+
 		fileName := "current.log"
 		hypershiftSuffix := ".log"
 		if r.URL.Query().Get("previous") == "true" {
@@ -275,6 +296,48 @@ func New(l *zap.Logger, baseDir string) (*mux.Router, error) {
 	router.MethodNotAllowedHandler = router.NewRoute().HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "", http.StatusMethodNotAllowed) }).GetHandler()
 
 	return router, nil
+}
+
+func getSingleContainerPodContainerName(apiURL, namespace, name string) (string, int, error) {
+	resp, err := http.Get(fmt.Sprintf("%s/api/v1/namespaces/%s/pods/%s", apiURL, namespace, name))
+	if err != nil {
+		return "", http.StatusInternalServerError, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		errorBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", http.StatusInternalServerError, fmt.Errorf("failed to read error response %d body: %w", resp.StatusCode, err)
+		}
+
+		return "", http.StatusInternalServerError, fmt.Errorf("error response: %d. %s", err, string(errorBody))
+	}
+
+	podBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", http.StatusInternalServerError, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var pod corev1.Pod
+	if err := json.Unmarshal(podBytes, &pod); err != nil {
+		return "", http.StatusInternalServerError, fmt.Errorf("unmarshal failed: %w", err)
+	}
+
+	if len(pod.Spec.Containers) == 0 {
+		return "", http.StatusInternalServerError, errors.New("invalid pod zero containers")
+	}
+
+	if len(pod.Spec.Containers) > 1 {
+		containerNames := make([]string, 0, len(pod.Spec.Containers))
+		for _, container := range pod.Spec.Containers {
+			containerNames = append(containerNames, container.Name)
+		}
+
+		return "", http.StatusBadRequest, fmt.Errorf("a container name must be specified for pod %s, choose one of: %s", name, containerNames)
+	}
+
+	return pod.Spec.Containers[0].Name, http.StatusOK, nil
 }
 
 func serializeAndWrite(l *zap.Logger, w http.ResponseWriter, data interface{}) {

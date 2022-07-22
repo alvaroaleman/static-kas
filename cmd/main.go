@@ -12,6 +12,8 @@ import (
 	"github.com/alvaroaleman/static-kas/pkg/handler"
 )
 
+const Port string = "8080"
+
 type options struct {
 	baseDir string
 }
@@ -35,12 +37,12 @@ func main() {
 		l.Fatal("--base-dir is mandatory")
 	}
 
-	router, err := handler.New(l, o.baseDir)
+	router, err := handler.New(l, o.baseDir, Port)
 	if err != nil {
 		l.Fatal("failed to construct server", zap.Error(err))
 	}
 
-	if err := http.ListenAndServe(":8080", router); err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf(":%s", Port), router); err != nil {
 		l.Error("server ended", zap.Error(err))
 	}
 }
