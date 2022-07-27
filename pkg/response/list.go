@@ -69,7 +69,10 @@ func (l *listResponse) run() error {
 	}
 
 	sort.Slice(list.Items, func(a, b int) bool {
-		return !list.Items[a].GetCreationTimestamp().After(list.Items[b].GetCreationTimestamp().Time)
+		if list.Items[a].GetCreationTimestamp() != list.Items[b].GetCreationTimestamp() {
+			return !list.Items[a].GetCreationTimestamp().After(list.Items[b].GetCreationTimestamp().Time)
+		}
+		return list.Items[a].GetName() < list.Items[b].GetName()
 	})
 
 	if isWatch(l.r) {

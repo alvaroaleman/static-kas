@@ -540,7 +540,10 @@ func TestServer(t *testing.T) {
 					t.Fatalf("failed to list pods: %v", err)
 				}
 				isSorted := sort.SliceIsSorted(podList.Items, func(a, b int) bool {
-					return podList.Items[a].CreationTimestamp.Before(&podList.Items[b].CreationTimestamp)
+					if podList.Items[a].CreationTimestamp != podList.Items[b].CreationTimestamp {
+						return podList.Items[a].CreationTimestamp.Before(&podList.Items[b].CreationTimestamp)
+					}
+					return podList.Items[a].Name < podList.Items[b].Name
 				})
 				if !isSorted {
 					t.Error("resulting pod list is not sorted by creationTimestamp")
