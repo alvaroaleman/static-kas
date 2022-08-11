@@ -25,3 +25,9 @@ kind: Config
 EOF
 ```
 3. Use `kubectl` or any other standard client to interact with the static kas: `kubectl --kubeconfig=/tmp/kk get pod`
+
+
+# Multiple dumps
+
+If you have a folder with multiple dumps, you can add the `--kubeconfig=/tmp/kk` arg which will makke `static-kas` discover
+all dumps in there, create a kubeconfig with a context for each of them and write it to the passed location.
