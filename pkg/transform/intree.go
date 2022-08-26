@@ -38,11 +38,32 @@ import (
 	_ "k8s.io/kubernetes/pkg/apis/rbac/install"
 	_ "k8s.io/kubernetes/pkg/apis/scheduling/install"
 	_ "k8s.io/kubernetes/pkg/apis/storage/install"
+
+	_ "github.com/openshift/openshift-apiserver/pkg/api/install"
+	appsinternalversion "github.com/openshift/openshift-apiserver/pkg/apps/printers/internalversion"
+	authorizationinternalversion "github.com/openshift/openshift-apiserver/pkg/authorization/printers/internalversion"
+	buildinternalversion "github.com/openshift/openshift-apiserver/pkg/build/printers/internalversion"
+	imageinternalversion "github.com/openshift/openshift-apiserver/pkg/image/printers/internalversion"
+	projectinternalversion "github.com/openshift/openshift-apiserver/pkg/project/printers/internalversion"
+	quotainternalversion "github.com/openshift/openshift-apiserver/pkg/quota/printers/internalversion"
+	routeinternalversion "github.com/openshift/openshift-apiserver/pkg/route/printers/internalversion"
+	securityinternalversion "github.com/openshift/openshift-apiserver/pkg/security/printers/internalversion"
+	templateinternalversion "github.com/openshift/openshift-apiserver/pkg/template/printers/internalversion"
 )
 
 func newInTreeHandler(l *zap.Logger) *printHandler {
 	ph := &printHandler{log: l}
 	internalversion.AddHandlers(ph)
+
+	appsinternalversion.AddAppsOpenShiftHandlers(ph)
+	authorizationinternalversion.AddAuthorizationOpenShiftHandler(ph)
+	buildinternalversion.AddBuildOpenShiftHandlers(ph)
+	imageinternalversion.AddImageOpenShiftHandlers(ph)
+	projectinternalversion.AddProjectOpenShiftHandlers(ph)
+	quotainternalversion.AddQuotaOpenShiftHandler(ph)
+	routeinternalversion.AddRouteOpenShiftHandlers(ph)
+	securityinternalversion.AddSecurityOpenShiftHandler(ph)
+	templateinternalversion.AddTemplateOpenShiftHandlers(ph)
 
 	apiregistrationinstall.Install(legacyscheme.Scheme)
 	apiServiceRest := &apiservicerest.REST{}
