@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -114,7 +113,7 @@ func main() {
 		if err != nil {
 			l.Fatal("Failed to serialize kubeconfig", zap.Error(err))
 		}
-		if err := ioutil.WriteFile(o.kubeCfg, serialized, 0644); err != nil {
+		if err := os.WriteFile(o.kubeCfg, serialized, 0644); err != nil {
 			l.Fatal("Failed to write kubeconfig", zap.Error(err))
 		}
 	}
