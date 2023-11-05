@@ -125,12 +125,12 @@ func (ph *printHandler) transformFunc(tableVersion string, fallback TransformFun
 }
 
 // printInternal prints using an imported table printer. Because the tableprinters act on the internal version, we have to:
-// * Convert into the internal version
-// * Call the printfunc using reflect (The printfuncs are given to us as a slice of type Any)
-// * Convert the object that is part of the row from the internal version to the external version and set the GVK along
-//   the way, because:
-//    * Kubectl will refuse the entire list if any of the object keys does not have GVK set
-//    * Kubectl infers the namespace in case of namespaced objects from the embedded object, so we can not just omit it
+//   - Convert into the internal version
+//   - Call the printfunc using reflect (The printfuncs are given to us as a slice of type Any)
+//   - Convert the object that is part of the row from the internal version to the external version and set the GVK along
+//     the way, because:
+//   - Kubectl will refuse the entire list if any of the object keys does not have GVK set
+//   - Kubectl infers the namespace in case of namespaced objects from the embedded object, so we can not just omit it
 func (ph *printHandler) printInternal(tableVersion string, o runtime.Object) (*metav1.Table, error) {
 	internalVersion, err := legacyscheme.Scheme.New(schema.GroupVersionKind{Group: o.GetObjectKind().GroupVersionKind().Group, Kind: o.GetObjectKind().GroupVersionKind().Kind, Version: runtime.APIVersionInternal})
 	if err != nil {
