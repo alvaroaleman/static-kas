@@ -221,6 +221,7 @@ func New(l *zap.Logger, baseDir string, port string) (*mux.Router, error) {
 		}
 	}).Methods(http.MethodGet)
 	router.HandleFunc("/apis", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.Write(serializedGroupList)
 	}).Methods(http.MethodGet)
 	for groupVersion := range groupSerializedResourceListMap {
