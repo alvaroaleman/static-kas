@@ -56,6 +56,10 @@ func Discover(l *zap.Logger, basePath string) (map[string]*metav1.APIResourceLis
 				return
 			}
 
+			if len(raw) == 0 {
+				return
+			}
+
 			u := &unstructured.Unstructured{}
 			if err := yaml.Unmarshal(raw, u); err != nil {
 				errs.add(fmt.Errorf("failed to decode %s into an unstructured: %w", path, err))
