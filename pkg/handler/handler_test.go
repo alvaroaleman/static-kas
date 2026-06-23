@@ -557,6 +557,37 @@ func TestServer(t *testing.T) {
 			),
 		},
 		{
+			name: "Watch with sendInitialEvents sends BOOKMARK",
+			run: func(t *testing.T) {
+				watchCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				defer cancel()
+				req, err := http.NewRequestWithContext(watchCtx, http.MethodGet, "http://127.0.0.1:8080/api/v1/pods?watch=true&sendInitialEvents=true", nil)
+				if err != nil {
+					t.Fatalf("failed to build request: %v", err)
+				}
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					t.Fatalf("request failed: %v", err)
+				}
+				defer resp.Body.Close()
+				decoder := json.NewDecoder(resp.Body)
+				var gotBookmark bool
+				for decoder.More() {
+					var ev metav1.WatchEvent
+					if err := decoder.Decode(&ev); err != nil {
+						break
+					}
+					if ev.Type == "BOOKMARK" {
+						gotBookmark = true
+						break
+					}
+				}
+				if !gotBookmark {
+					t.Error("expected BOOKMARK event after ADDED events")
+				}
+			},
+		},
+		{
 			name: "List response is sorted",
 			run: func(t *testing.T) {
 				podList := &corev1.PodList{}
